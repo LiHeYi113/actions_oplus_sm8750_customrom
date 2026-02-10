@@ -220,11 +220,12 @@ jobs:
 
           echo "🛠️ 正在设置SukiSU Ultra..."
 
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/builtin/kernel/setup.sh" | bash -s main
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/builtin/kernel/setup.sh" | bash -s builtin
 
           cd KernelSU
           KSU_VERSION_COUNT=$(git rev-list --count main)
           export KSUVER=$(expr $KSU_VERSION_COUNT + 37185)
+          echo "KSUVER=$KSUVER" >> $GITHUB_ENV
 
           for i in {1..3}; do
             KSU_API_VERSION=$(curl -fsSL "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/builtin/kernel/Kbuild" | \
