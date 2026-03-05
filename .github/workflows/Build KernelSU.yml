@@ -239,7 +239,7 @@ jobs:
 
           echo "⬇️ 下载所需补丁..."
           if [ "${{ github.event.inputs.SUSFS }}" == "On" ]; then
-            git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android15-6.6
+            git clone https://gitlab.com/cctv18/susfs4oki.git -b oki-android15-6.6
           fi
           git clone https://github.com/mrcxlinux/kernel_patches.git
           git clone https://github.com/ShirkNeko/SukiSU_patch.git
@@ -247,7 +247,7 @@ jobs:
           cd kernel_platform
           echo "📝 复制补丁文件..."
           if [ "${{ github.event.inputs.SUSFS }}" == "On" ]; then
-            cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./KernelSU/
+            cp ../susfs4oki/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./KernelSU/
             PATCH_FILE="./KernelSU/10_enable_susfs_for_ksu.patch"
             if [ -f "$PATCH_FILE" ]; then
               if grep -q "a/kernel/Makefile" "$PATCH_FILE"; then
@@ -264,9 +264,9 @@ jobs:
               echo "❌ 未找到SUSFS补丁！"
               exit 1
             fi
-            cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch ./common/
-            cp ../susfs4ksu/kernel_patches/fs/* ./common/fs/
-            cp ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+            cp ../susfs4oki/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch ./common/
+            cp ../susfs4oki/kernel_patches/fs/* ./common/fs/
+            cp ../susfs4oki/kernel_patches/include/linux/* ./common/include/linux/
           fi
 
           mkdir -p ./common/lib/lz4/lz4armv8

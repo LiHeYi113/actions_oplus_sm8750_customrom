@@ -246,7 +246,7 @@ jobs:
 
           echo "⬇️ 下载所需补丁..."
           if [ "${{ github.event.inputs.SUSFS }}" == "On" ]; then          
-            git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android15-6.6
+            git clone https://gitlab.com/cctv18/susfs4oki.git -b oki-android15-6.6
           fi
           git clone https://github.com/mrcxlinux/kernel_patches.git
           git clone https://github.com/ShirkNeko/SukiSU_patch.git
@@ -254,9 +254,9 @@ jobs:
           cd kernel_platform
           echo "📝 复制补丁文件..."
           if [ "${{ github.event.inputs.SUSFS }}" == "On" ]; then
-            cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch ./common/
-            cp ../susfs4ksu/kernel_patches/fs/* ./common/fs/
-            cp ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+            cp ../susfs4oki/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch ./common/
+            cp ../susfs4oki/kernel_patches/fs/* ./common/fs/
+            cp ../susfs4oki/kernel_patches/include/linux/* ./common/include/linux/
           else
             cp ../kernel_patches/susfs/scope_min_manual_hooks_v1.9.patch ./common/
           fi
