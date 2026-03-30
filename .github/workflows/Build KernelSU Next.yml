@@ -127,7 +127,7 @@ jobs:
           
       - name: 💾 Restore ccache (With SUSFS) | 恢复ccache缓存 (With SUSFS)
         if: ${{ github.event.inputs.SUSFS == 'On' }}
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ runner.os }}-${{ github.ref }}-KSUNext-SUSFS
@@ -138,7 +138,7 @@ jobs:
             
       - name: 💾 Restore ccache (Without SUSFS) | 恢复ccache缓存 (Without SUSFS)
         if: ${{ github.event.inputs.SUSFS == 'Off' }}
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ runner.os }}-${{ github.ref }}-KSUNext-NoSUSFS
@@ -546,7 +546,7 @@ jobs:
           echo "ARTIFACT_NAME=${FINAL_NAME}" >> $GITHUB_OUTPUT
           
       - name: 📤 Upload AnyKernel3 | 上传 AnyKernel3
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.set_name.outputs.ARTIFACT_NAME }}
           path: ./AnyKernel3/*
@@ -567,7 +567,7 @@ jobs:
           echo "✅ 完成！"
           
       - name: 📤 Upload zram.zip | 上传 zram.zip
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: zram-module
           path: ./zram/*
