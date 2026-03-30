@@ -65,7 +65,7 @@
 ---
 ### ✨ How to compile!
 
-➜ **fork** the project
+➜ **fork** the project (with all branches)
 
 ➜ actions ➜ enable workflows
 
