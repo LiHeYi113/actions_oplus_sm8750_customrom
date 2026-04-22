@@ -885,22 +885,6 @@ jobs:
           echo "--- Pre-Build Time: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
           echo "--- Pre-Build File Timestamps: ---"
           LD_PRELOAD=$PRELOAD_LIBS stat ./Makefile
-
-          # 🚑 SURGICAL FIX 2.1: Bulletproof upstream PR #873 manually
-          echo "🚑 Patching SukiSU-Ultra ksud.c and kernel_compat.h..."
-          KSUD="drivers/kernelsu/runtime/ksud.c"
-          COMPAT="drivers/kernelsu/infra/kernel_compat.h"
-          
-          # Fix 1: Nuke the broken line and rewrite it perfectly from scratch
-          if [ -f "$KSUD" ]; then
-            sed -i 's/.*CONFIG_KSU_SUSFS.*KSU_COMPAT_USE_STATIC_KEY.*/#if defined(CONFIG_KSU_SUSFS) \&\& defined(KSU_COMPAT_USE_STATIC_KEY)/g' "$KSUD"
-          fi
-          
-          # Fix 2: Append the missing #endif to close the unterminated conditional
-          if [ -f "$COMPAT" ]; then
-            echo "" >> "$COMPAT"
-            echo "#endif /* __KSU_H_KERNEL_COMPAT */" >> "$COMPAT"
-          fi
           
           sudo rm -rf /usr/share/dotnet &
           sudo rm -rf /usr/local/lib/android &
