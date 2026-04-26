@@ -426,6 +426,45 @@ jobs:
 
           echo "✅ SukiSU Ultra 版本信息配置完成"
 
+      - name: 🔧 Fix missing KSU static key symbols
+        run: |
+          cd kernel_workspace/common/drivers/kernelsu
+          
+          # Проверяем, не определены ли уже эти символы
+          if grep -r "ksu_is_input_hook_enabled" . --include="*.c" -l | grep -v "\.h" | grep -v "ksud.c" > /dev/null 2>&1; then
+            echo "Symbols already defined, skipping."
+            exit 0
+          fi
+          
+          cat > ksu_static_keys_stub.c << 'EOF'
+          #include <linux/kernel.h>
+          #include <linux/jump_label.h>
+          
+          /* SukiSU Ultra static key stubs for MANUAL_HOOK (non-kprobes) builds.
+           * These are normally provided by the hook manager but are absent in
+           * builtin/embedded configurations targeting this kernel source.
+           */
+          DEFINE_STATIC_KEY_FALSE(ksu_is_input_hook_enabled);
+          EXPORT_SYMBOL_GPL(ksu_is_input_hook_enabled);
+          
+          DEFINE_STATIC_KEY_FALSE(ksu_is_init_rc_hook_enabled);
+          EXPORT_SYMBOL_GPL(ksu_is_init_rc_hook_enabled);
+          
+          /* _key_false variants used in jump_table references */
+          struct static_key ksu_input_hook_key_false = STATIC_KEY_INIT_FALSE;
+          EXPORT_SYMBOL_GPL(ksu_input_hook_key_false);
+          
+          struct static_key ksu_init_rc_hook_key_false = STATIC_KEY_INIT_FALSE;
+          EXPORT_SYMBOL_GPL(ksu_init_rc_hook_key_false);
+          EOF
+          
+          # Добавляем в Makefile если ещё нет
+          if ! grep -q "ksu_static_keys_stub" Makefile 2>/dev/null; then
+            echo "kernelsu-y += ksu_static_keys_stub.o" >> Makefile
+          fi
+          
+          echo "✅ KSU static key stubs injected"
+
       - name: 🔧 Setup Patches | 配置补丁
         run: |
           cd kernel_workspace
