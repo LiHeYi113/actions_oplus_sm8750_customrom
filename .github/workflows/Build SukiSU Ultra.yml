@@ -859,7 +859,7 @@ jobs:
           sed -i 's/${scm_version}//' ./common/scripts/setlocalversion
           echo "CONFIG_LOCALVERSION_AUTO=n" >> ./common/arch/arm64/configs/gki_defconfig
 
-      - name: 🔨 Build Kernel
+      - name: 🔨 Build Kernel | 编译内核
         run: |
           WORKDIR="$(pwd)"
           export MAP="-fdebug-prefix-map=${GITHUB_WORKSPACE}=. -fmacro-prefix-map=${GITHUB_WORKSPACE}=. -ffile-prefix-map=${GITHUB_WORKSPACE}=."
@@ -868,6 +868,7 @@ jobs:
           CLANG_DIR="$WORKDIR/kernel_workspace/zyc-clang/bin"
           CLANG_VERSION="$($CLANG_DIR/clang --version | head -n 1)"
           LLD_VERSION="$($CLANG_DIR/ld.lld --version | head -n 1)"
+          echo "Compiler Info:"
           echo "Clang Version: $CLANG_VERSION"
           echo "LLD Version: $LLD_VERSION"
           pahole_version=$(pahole --version 2>/dev/null | head -n1); [ -z "$pahole_version" ] && echo "Pahole: Not Installed" || echo "Pahole: $pahole_version"
@@ -903,7 +904,25 @@ jobs:
           echo 'export FAKESTAT="'$FAKESTAT'"' >> ld-wrapper
           echo 'export FAKETIME="'$FAKETIME'"' >> ld-wrapper
           echo 'ld.lld "$@"' >> ld-wrapper
+          
+          echo "--- [Wrapper Test] Creating Time Hijack Test Script ---"
+          echo '#!/bin/bash' > test-wrapper.sh
+          echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> test-wrapper.sh
+          echo 'export FAKESTAT="'$FAKESTAT'"' >> test-wrapper.sh
+          echo 'export FAKETIME="'$FAKETIME'"' >> test-wrapper.sh
+          echo 'echo ">>> Wrapper environment check complete."' >> test-wrapper.sh
+          echo 'exec "$@"' >> test-wrapper.sh
+          chmod +x test-wrapper.sh
+          echo "--- [Wrapper Test] Testing (date) command ---"
+          ./test-wrapper.sh date
+          echo "--- [Wrapper Test] Testing (stat) command ---"
+          ./test-wrapper.sh stat ./Makefile
+          echo "--- [Wrapper Test] Test Complete ---"
           chmod +x cc-wrapper ld-wrapper
+          
+          echo "--- Pre-Build Time: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
+          echo "--- Pre-Build File Timestamps: ---"
+          LD_PRELOAD=$PRELOAD_LIBS stat ./Makefile
           
           sudo rm -rf /usr/share/dotnet &
           sudo rm -rf /usr/local/lib/android &
@@ -925,8 +944,13 @@ jobs:
             KCFLAGS="-O2 -Wno-error -Wno-implicit-function-declaration -Wno-implicit-int -Wno-default-const-init-var-unsafe -Wno-format -Wno-unknown-warning-option ${EXTRA_CFLAGS:-} ${MAP}" \
             Image
 
+          echo "--- Post-Build Time: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
+          echo "--- Post-Build File Timestamps: ---"
+          LD_PRELOAD=$PRELOAD_LIBS stat ./Makefile
           echo "Kernel Compilation Complete!"
+          echo "CCache Status:"
           ccache -s
+          echo "Disk Space Post-Build:"
           df -h
 
       - name: 📦 Save New CCache
