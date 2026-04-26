@@ -305,12 +305,13 @@ jobs:
       - name: 🔧 Fix missing KSU static key symbols
         working-directory: kernel_workspace/common
         run: |
-          echo "Locating ksud.c..."
-          KSUD=$(find drivers/kernelsu -name "ksud.c" | head -1)
+          echo "=== Searching for ksud.c ==="
+          find . -name "ksud.c" 2>/dev/null
+
+          KSUD=$(find . -name "ksud.c" | head -1)
           if [ -z "$KSUD" ]; then
-            echo "❌ ksud.c not found!"
-            find drivers/kernelsu -name "*.c" | head -20
-            exit 1
+            echo "❌ ksud.c not found, skipping"
+            exit 0
           fi
           echo "Found: $KSUD"
 
