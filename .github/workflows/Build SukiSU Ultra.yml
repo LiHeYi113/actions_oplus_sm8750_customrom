@@ -180,7 +180,7 @@ jobs:
           sudo apt-mark hold libc-bin &&
           sudo apt purge man-db &&
           sudo apt update &&
-          sudo apt-get install -y --no-install-recommends binutils python-is-python3 libssl-dev libelf-dev aria2 dos2unix &
+          sudo apt-get install -y --no-install-recommends binutils python-is-python3 ninja libssl-dev libelf-dev aria2 dos2unix &
 
           echo "Cloning source repository..."
           curl -L https://github.com/palazik/OnePlus_Kernel_Backport/archive/refs/heads/6.6.127_oneplus13_coloros16.0.5.zip -o common.zip && 
@@ -246,7 +246,8 @@ jobs:
       - name: Configure CCache Directory
         run: |
           echo "CCACHE_DIR=$HOME/.ccache_6.6.127" >> $GITHUB_ENV
-          echo "LDCACHE_DIR=$HOME/.ld_cache" >> $GITHUB_ENV
+          echo "LDCACHE_DIR=/dev/shm/ldcache_6.6.127" >> $GITHUB_ENV
+          mkdir -p /dev/shm/ldcache_6.6.127
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
           echo "Current Disk Space:"
           df -h
@@ -400,14 +401,13 @@ jobs:
 
           echo "⬇️ Cloning required patch repos..."
 
-          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then          
-            git clone https://github.com/cctv18/susfs4oki.git -b oki-android15-6.6
+          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then         
+            git clone --depth=1 https://github.com/cctv18/susfs4oki.git -b oki-android15-6.6 &
           fi
-
-          git clone https://github.com/mrcxlinux/kernel_patches.git
-          git clone https://github.com/ShirkNeko/SukiSU_patch.git
-          # WildKernels patches (mem/sched/net optimizations, ntsync, droidspaces)
-          git clone --depth=1 https://github.com/TheWildJames/kernel_patches.git wildkernels_patches
+          git clone --depth=1 https://github.com/mrcxlinux/kernel_patches.git &
+          git clone --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git &
+          git clone --depth=1 https://github.com/TheWildJames/kernel_patches.git wildkernels_patches &
+          wait
 
           echo "📝 Copying patch files..."
 
@@ -918,7 +918,7 @@ jobs:
           cd kernel_workspace/common
           mkdir -p "$LDCACHE_DIR"
           echo '#!/bin/bash' > ld-wrapper
-          echo 'ld.lld "$@" --thinlto-cache-dir='"$LDCACHE_DIR"' --thinlto-jobs=$(nproc --all)' >> ld-wrapper
+          echo 'ld.lld "$@" --thinlto-cache-dir='"$LDCACHE_DIR"' --thinlto-jobs=$(($(nproc --all) / 2))' >> ld-wrapper
           chmod +x ld-wrapper
           wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfakestat.so || true
           wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfaketimeMT.so || true
@@ -934,10 +934,9 @@ jobs:
             KCFLAGS="-O2 -Wno-error -Wno-implicit-function-declaration -Wno-implicit-int -Wno-default-const-init-var-unsafe -Wno-format -Wno-unknown-warning-option" \
             gki_defconfig
 
-          make -j$(nproc --all) LLVM=1 LLVM_IAS=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+          ninja -j$(nproc --all) -C out Image LLVM=1 LLVM_IAS=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
             CC="ccache clang" LD="$(pwd)/ld-wrapper" HOSTLD="$(pwd)/ld-wrapper" O=out \
-            KCFLAGS="-O2 -Wno-error -Wno-implicit-function-declaration -Wno-implicit-int -Wno-default-const-init-var-unsafe -Wno-format -Wno-unknown-warning-option ${EXTRA_CFLAGS:-} ${MAP}" \
-            Image
+            KCFLAGS="-O2 -Wno-error -Wno-implicit-function-declaration -Wno-implicit-int -Wno-default-const-init-var-unsafe -Wno-format -Wno-unknown-warning-option ${EXTRA_CFLAGS:-} ${MAP}"
 
           echo "Kernel Compilation Complete!"
 
