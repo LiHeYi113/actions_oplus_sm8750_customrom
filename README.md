@@ -22,12 +22,12 @@
 
 | Property | Value |
 |----------|-------|
-| **Chipset** | `SM8750` \| Snapdragon 8 Elite \| "sun" |
+| **Chipset** | `SM8750` \| Snapdragon 8 Elite \| sun |
 | **Kernel Version** | `Linux 6.6` (GKI Android 15) |
 | **Android Version** | `15 VanillaIceCream` (compatible with later versions) |
 | **ROM Compatibility** | OxygenOS / ColorOS (CN & Global) |
 | **Root Solution** | SukiSU Ultra / KSU Next (Multi-Manager) |
-| **Build System** | GitHub Actions CI/CD (optimized for ~4-5min builds) |
+| **Build System** | GitHub Actions CI/CD (optimized for ~5-6min builds) |
 
 ---
 
