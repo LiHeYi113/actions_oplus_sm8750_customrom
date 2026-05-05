@@ -122,7 +122,6 @@ on:
         required: true
         type: boolean
         default: false
-      # ── NEW FEATURES ──────────────────────────────────────────────────────────
       ntsync_enable:
         description: 'Enable NTSync (low-latency NT sync primitives, great for gaming/Wine)'
         required: true
@@ -236,7 +235,7 @@ jobs:
         id: ecs-cache
         with:
           path: /tmp/ccache-ecs-bin
-          key: ccache-ecs-${{ runner.os }}-084a7620  # хэш последнего коммита репо
+          key: ccache-ecs-${{ runner.os }}-084a7620
 
       - name: Build & Install ccache-ECS
         run: |
@@ -941,7 +940,7 @@ jobs:
           sed -i 's/${scm_version}//' ./common/scripts/setlocalversion
           echo "CONFIG_LOCALVERSION_AUTO=n" >> ./common/arch/arm64/configs/gki_defconfig
 
-      - name: 🔨 Build Kernel | 编译内核
+      - name: 🔨 Build Kernel
         run: |
           WORKDIR="$(pwd)"
           export MAP="-fdebug-prefix-map=${GITHUB_WORKSPACE}=. -fmacro-prefix-map=${GITHUB_WORKSPACE}=. -ffile-prefix-map=${GITHUB_WORKSPACE}=."
