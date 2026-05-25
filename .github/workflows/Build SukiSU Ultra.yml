@@ -988,14 +988,14 @@ jobs:
           df -h
 
       - name: 📦 Save New CCache
-        if: always()
+        if: success()
         uses: actions/cache/save@v4
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-neov4-6.6.138-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
 
       - name: 📦 Save LTO CCache
-        if: always() && inputs.lto_type == 'thin'
+        if: success() && inputs.lto_type == 'thin'
         uses: actions/cache/save@v4
         with:
           path: ${{ env.LDCACHE_DIR }}
@@ -1314,15 +1314,18 @@ jobs:
           - **Droidspaces:** ${{ github.event.inputs.droidspaces_enable }}
           - **IP_SET + IPv6 NAT:** ${{ github.event.inputs.ip_set_enable }}
           - **TTL Target:** ${{ github.event.inputs.ttl_enable }}
-          - **Memory Opt Patches:** ${{ github.event.inputs.mem_opt_patches }}
+          - **Memory & Scheduler Optimizations:** ${{ github.event.inputs.mem_opt_patches }}
           - **Multi-Manager:** true
           - **KPM:** ${{ github.event.inputs.KPM }}
           - **LZ4:** ${{ github.event.inputs.lz4_enable }}
           - **LZ4KD:** ${{ github.event.inputs.lz4kd_enable }}
+          - **ZRAM Writeback:** ${{ github.event.inputs.zram_writeback }}
+          - **SchedUil Optimizations:** ${{ github.event.inputs.schedutil_opt }}
           - **BBR/Brutal:** ${{ github.event.inputs.bbr_enable }}
           - **ADIOS IO:** ${{ github.event.inputs.adios_enable }}
           - **Baseband Guard:** ${{ github.event.inputs.baseband_guard }}
           - **Fengchi:** ${{ github.event.inputs.fengchi }}
+          - **Oryon CPU Optimizations:** ${{ github.event.inputs.cpu_opt }}
           - **Unicode Fix:** ${{ github.event.inputs.unicode_fix }}
           - **WireGuard:** ${{ github.event.inputs.wireguard }}
           - **LRNG v59:** ${{ github.event.inputs.lrng_enable }}
