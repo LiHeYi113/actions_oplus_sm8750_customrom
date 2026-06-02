@@ -1,4 +1,4 @@
-name: SukiSU Ultra OP13 Build
+name: ReSukiSU OP13 Build
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-6.6.138
@@ -336,12 +336,12 @@ jobs:
           echo "Updating atime to achieve cache eviction..."
           find "${{ env.CCACHE_DIR }}" -type f -exec touch -t $(date -d "1 day ago" +%Y%m%d%H%M) {} + || true
               
-      - name: ⚡ Setup SukiSU Ultra
+      - name: ⚡ Setup ReSukiSU
         run: |
           cd kernel_workspace/common
 
-          echo "🛠️ Setting up SukiSU Ultra..."
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/builtin/kernel/setup.sh" | bash -s builtin
+          echo "🛠️ Setting up ReSukiSU..."
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/dev/kernel/setup.sh" | bash -s builtin
 
           cd KernelSU
           
@@ -379,9 +379,9 @@ jobs:
           ccflags-y += -DKSU_VERSION_FULL=\"v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@palaziks\"
           EOF
 
-          echo "✅ SukiSU Ultra version configured"
+          echo "✅ ReSukiSU version configured"
 
-      - name: 🔧 Fix SUSFS selinux symbol linkage (builtin SukiSU)
+      - name: 🔧 Fix SUSFS selinux symbol linkage (builtin ReSukiSU)
         if: github.event.inputs.SUSFS == 'true'
         working-directory: kernel_workspace/common
         run: |
@@ -439,7 +439,7 @@ jobs:
             git clone --depth=1 https://github.com/cctv18/susfs4oki.git -b oki-android15-6.6 &
           fi
           git clone --depth=1 https://github.com/mrcxlinux/kernel_patches.git &
-          git clone --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git &
+          git clone --depth=1 https://github.com/ReSukiSU/ReSukiSU_Patches.git &
           git clone --depth=1 https://github.com/TheWildJames/kernel_patches.git wildkernels_patches &
           wait
 
