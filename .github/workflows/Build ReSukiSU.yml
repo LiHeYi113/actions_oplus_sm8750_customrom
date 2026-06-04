@@ -507,17 +507,6 @@ jobs:
           git apply -p1 < 001-lz4.patch || echo "LZ4 Patch failed or already applied"
           patch -p1 < 002-zstd.patch || echo "ZSTD Patch failed or already applied"
 
-      - name: Apply LZ4KD Patch
-        if: inputs.lz4kd_enable
-        run: |
-          echo "Adding LZ4KD patch..."
-          cd kernel_workspace/common
-          cp -r ../SukiSU_patch/other/zram/lz4k/include/linux/* ./include/linux/
-          cp -r ../SukiSU_patch/other/zram/lz4k/lib/* ./lib
-          cp -r ../SukiSU_patch/other/zram/lz4k/crypto/* ./crypto
-          cp ../SukiSU_patch/other/zram/zram_patch/${{ env.KERNEL_VERSION }}/lz4kd.patch ./
-          patch -p1 -F 3 < lz4kd.patch || true
-
       - name: Configure ZRAM Writeback
         if: inputs.zram_writeback
         working-directory: kernel_workspace
@@ -811,24 +800,6 @@ jobs:
           CONFIG_NETFILTER_XT_MATCH_STATE=y
           CONFIG_NETFILTER_XT_TARGET_MASQUERADE=y
           CONFIG_NETFILTER_XT_TARGET_REDIRECT=y
-          EOF
-
-      - name: Enable LRNG v59
-        if: inputs.lrng_enable
-        working-directory: kernel_workspace/common
-        run: |
-          echo "Enabling LRNG v59..."
-          git clone --depth=1 https://github.com/smuellerDD/lrng.git /tmp/lrng_src
-          cp -r /tmp/lrng_src/drivers/char/lrng/* drivers/char/lrng/
-          cat >> arch/arm64/configs/gki_defconfig << 'EOF'
-          CONFIG_LRNG=y
-          CONFIG_LRNG_SHA256=y
-          CONFIG_LRNG_COLLECTION_SIZE=1024
-          CONFIG_LRNG_HEALTH_TESTS=y
-          CONFIG_LRNG_RCT_CUTOFF=31
-          CONFIG_LRNG_APT_CUTOFF=325
-          CONFIG_LRNG_IRQ=y
-          CONFIG_LRNG_CONTINUOUS_COMPRESSION_ENABLED=y
           EOF
 
       - name: Enable Wakelock Blocker
