@@ -334,42 +334,52 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/dev/kernel/setup.sh" | bash -s dev
 
           cd KernelSU
-          
+
+          # 清理可能的 Git 冲突
+          git reset --hard HEAD
+          git clean -fd
+
           KSU_VERSION_COUNT=$(git rev-list --count HEAD)
           export KSUVER=$(expr $KSU_VERSION_COUNT + 30700)
           echo "KSUVER=$KSUVER" >> $GITHUB_ENV
 
+          # 更精确的 API 版本检测
+          KBUILD_FILE="kernel/Kbuild"
+          if [ ! -f "$KBUILD_FILE" ]; then
           KBUILD_FILE="kernel/Makefile"
-          if [ -f "kernel/Kbuild" ]; then
-            KBUILD_FILE="kernel/Kbuild"
           fi
 
-          echo "🔍 Extracting API version from local $KBUILD_FILE..."
-          
-          KSU_API_VERSION=$(grep -E "KSU_VERSION_API[[:space:]]*:=" "$KBUILD_FILE" | cut -d'=' -f2 | tr -d '[:space:]')
-          
+          echo "🔍 Extracting API version from $KBUILD_FILE..."
+
+          # 尝试多种方式获取 API 版本
+          KSU_API_VERSION=$(grep -E "^KSU_VERSION_API[[:space:]]*:=" "$KBUILD_FILE" | cut -d'=' -f2 | tr -d '[:space:]')
+
           if [ -z "$KSU_API_VERSION" ]; then
-            KSU_API_VERSION=$(grep -oP '(?<=-DKSU_VERSION=)\d+' "$KBUILD_FILE" | head -1)
+          KSU_API_VERSION=$(grep -E "KSU_VERSION[[:space:]]*=" "$KBUILD_FILE" | grep -oP '\d+' | head -1)
           fi
-          
+
           if [ -z "$KSU_API_VERSION" ]; then
-            echo "⚠️ Could not auto-detect API version. Falling back to default (11952)..."
-            KSU_API_VERSION="11952"
+          echo "⚠️ Could not auto-detect API version. Using git describe..."
+          KSU_API_VERSION=$(git describe --tags --abbrev=0 | sed 's/v//' | cut -d'.' -f1)
+          fi
+
+          if [ -z "$KSU_API_VERSION" ]; then
+          echo "⚠️ Still failed. Falling back to default (11952)..."
+          KSU_API_VERSION="11952"
           fi
 
           KSU_COMMIT_HASH=$(git rev-parse --short=8 HEAD)
-          
-          echo "💉 Injecting custom version: v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@palaziks"
-          
-          sed -i 's/-DKSU_VERSION_FULL=[^ ]*//g' "$KBUILD_FILE"
-          sed -i '/KSU_VERSION_FULL/d' "$KBUILD_FILE"
-          
-          cat >> "$KBUILD_FILE" <<EOF
 
-          ccflags-y += -DKSU_VERSION_FULL=\"v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@palaziks\"
-          EOF
+          echo "💉 Injecting custom version: v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@palaziks"
+
+          # 安全地修改编译标志
+          sed -i '/-DKSU_VERSION_FULL=/d' "$KBUILD_FILE"
+
+          # 添加新的版本定义
+          echo "ccflags-y += -DKSU_VERSION_FULL=\\\"v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@palaziks\\\"" >> "$KBUILD_FILE"
 
           echo "✅ ReSukiSU version configured"
+          echo "Version: v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@palaziks"
 
       - name: 🔧 Fix SUSFS selinux symbol linkage (builtin ReSukiSU)
         if: github.event.inputs.SUSFS == 'true'
