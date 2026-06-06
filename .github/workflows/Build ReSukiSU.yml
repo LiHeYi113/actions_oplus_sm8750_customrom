@@ -1033,7 +1033,7 @@ jobs:
           TIME_NOW="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
 
           export TG_KERNEL_VERSION="6.6.138"
-          export TG_KSU_DISPLAY="SukiSU Ultra"
+          export TG_KSU_DISPLAY="ReSukiSU"
           export TG_KSUVER="${{ env.KSUVER }}"
           export TG_SUFFIX="palaziks-ShiftPorts"
           export TG_LTO="${{ github.event.inputs.lto_type }}"
@@ -1042,23 +1042,20 @@ jobs:
           export TG_RUN_URL="$RUN_URL"
           export TG_REPO="${{ github.repository }}"
           export TG_SUSFS="${{ github.event.inputs.SUSFS }}"
-          export TG_KPM="${{ github.event.inputs.KPM }}"
           export TG_BBR="${{ github.event.inputs.bbr_enable }}"
           export TG_ADIOS="${{ github.event.inputs.adios_enable }}"
           export TG_BBG="${{ github.event.inputs.baseband_guard }}"
           export TG_LZ4="${{ github.event.inputs.lz4_enable }}"
-          export TG_LZ4KD="${{ github.event.inputs.lz4kd_enable }}"
           export TG_MM="true"
           export TG_FENGCHI="${{ github.event.inputs.fengchi }}"
           export TG_HMBIRD="false"
           export TG_UFIX="${{ github.event.inputs.unicode_fix }}"
           export TG_ZWB="${{ github.event.inputs.zram_writeback }}"
           export TG_SCHED="${{ github.event.inputs.schedutil_opt }}"
-          export TG_CLANG="ZyCromerZ-19"
+          export TG_CLANG="AOSP Clang-r563880c"
           export TG_CPU_OPT="${{ github.event.inputs.cpu_opt }}"
           export TG_F2FS="${{ github.event.inputs.f2fs_opt }}"
           export TG_WG="${{ github.event.inputs.wireguard }}"
-          export TG_LRNG="${{ github.event.inputs.lrng_enable }}"
           export TG_WLB="${{ github.event.inputs.wakelock_blocker }}"
           export TG_NTSYNC="${{ github.event.inputs.ntsync_enable }}"
           export TG_DROIDSPACES="${{ github.event.inputs.droidspaces_enable }}"
@@ -1093,12 +1090,10 @@ jobs:
               {"tag": "h4", "children": ["⚡ Features"]},
               {"tag": "ul", "children": [
                   feat(e("TG_SUSFS"),   "SuSFS"),
-                  feat("true" if e("TG_KPM") != "false" else "false", f"KPM ({e('TG_KPM')})"),
                   feat("true" if e("TG_BBR") != "false" else "false", f"BBR/Brutal ({e('TG_BBR')})"),
                   feat(e("TG_ADIOS"),   "ADIOS IO Scheduler"),
                   feat(e("TG_BBG"),     "Baseband Guard"),
                   feat(e("TG_LZ4"),     "LZ4 1.10.0 + ZSTD 1.5.7"),
-                  feat(e("TG_LZ4KD"),  "LZ4KD ZRAM"),
                   feat(e("TG_MM"),      "Multi-Manager Support"),
                   feat(e("TG_FENGCHI"),"Fengchi Optimization"),
                   feat(e("TG_UFIX"),    "Unicode Bypass Fix"),
@@ -1107,7 +1102,6 @@ jobs:
                   feat(e("TG_CPU_OPT"),"Oryon CPU Optimizations"),
                   feat(e("TG_F2FS"),   "F2FS Optimizations"),
                   feat(e("TG_WG"),     "WireGuard VPN kernel level support"),
-                  feat(e("TG_LRNG"),   "LRNG v59"),
                   feat(e("TG_WLB"),    "Wakelock Blocker"),
                   feat(e("TG_NTSYNC"),      "NTSync (NT sync primitives)"),
                   feat(e("TG_DROIDSPACES"), "Droidspaces (proot-distro support)"),
@@ -1188,7 +1182,7 @@ jobs:
           CAPTION="❌ <b>Kernel Build Failed!</b>
 
           📱 <b>Device:</b> <code>OnePlus 13</code>
-          ⚡ <b>KSU:</b> <code>SukiSU Ultra</code>
+          ⚡ <b>KSU:</b> <code>ReSukiSU</code>
           📅 <b>Date:</b> $DATE
           📝 <b>Commit:</b> <code>$COMMIT_MSG</code>
           🔢 <b>Hash:</b> <a href=\"$REPO_URL/commit/${{ github.sha }}\">$(echo "${{ github.sha }}" | cut -c1-8)</a>"
