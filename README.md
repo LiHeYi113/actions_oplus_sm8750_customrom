@@ -1,7 +1,7 @@
 <div id="toc" align="center" style="margin-bottom: 0; padding-bottom: 0;">
   <ul style="list-style: none; margin: 0; padding: 0;">
     <summary>
-      <h1 align="center" style="margin: 0; padding: 0;">⋆ palaziks OnePlus Kernel ⋆</h1>
+      <h1 align="center" style="margin: 0; padding: 0;">⋆ palaziks CustomRom-KernelBuild ⋆</h1>
       <p align="center" style="font-size:12px; margin-top: 5px; margin-bottom: 20px;">
         <i>Stability-focused GKI 6.6 kernel for OnePlus 13 (SM8750) with ReSukiSU</i>
       </p>
@@ -26,8 +26,8 @@
 | **Chipset** | `SM8750` \| Snapdragon 8 Elite \| sun |
 | **Kernel Version** | `Linux 6.6` (GKI Android 15) |
 | **Android Version** | `15 VanillaIceCream` (compatible with later versions) |
-| **ROM Compatibility** | OxygenOS / ColorOS (CN & Global) |
-| **Root Solution** | SukiSU Ultra / KSU Next (Multi-Manager) |
+| **ROM Compatibility** | **custom rom (CrDroid has been tested and works fine; other custom ROMs should work in theory—please try them yourself.**) |
+| **Root Solution** | ReSukiSU / SukiSU Ultra / KSU Next (Multi-Manager) |
 | **Build System** | GitHub Actions CI/CD (optimized for ~5-6min builds) |
 
 ---
@@ -64,7 +64,6 @@
 ### 🎮 Gaming & Compatibility
 - ✅ **NTSync** – Low-latency NT sync primitives (Wine/Proton gaming) *(optional)*
 - ✅ **Droidspaces** – SYSVIPC + PID_NS + POSIX_MQUEUE for proot-distro
-- ✅ **LRNG v59** – Better entropy for crypto/gaming *(optional)*
 
 ### 🔋 Battery & Power
 - ✅ **Wakelock Blocker** – Reduce idle battery drain
