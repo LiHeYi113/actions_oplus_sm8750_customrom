@@ -69,7 +69,7 @@
 - ✅ **Re-Kernel Support** – Enhanced app freezing via NoActive/Freezer *(optional)*
 
 ### 🧩 KernelSU Enhancements
-- ✅ **KPM Support** – Kernel Patch Module for SukiSU Ultra / ReSukiSU *(optional)*
+- ✅ **KPM Support** – Kernel Patch Module for ReSukiSU / SukiSU Ultra *(optional)*
 - ✅ **Multi-Manager** – Compatible with multiple KSU variants
 
 ---
