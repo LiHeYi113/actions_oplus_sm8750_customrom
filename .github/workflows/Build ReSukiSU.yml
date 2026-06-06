@@ -19,11 +19,6 @@ on:
         required: true
         type: boolean
         default: true
-      KPM:
-        description: 'Enable KPM'
-        required: true
-        type: boolean
-        default: false
       lz4_enable:
         description: 'Install LZ4 1.10.0 + ZSTD 1.5.7 Patch'
         required: true
