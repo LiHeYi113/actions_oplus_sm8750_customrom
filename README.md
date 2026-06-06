@@ -138,8 +138,8 @@
    - ✅ Fengchi (performance scheduler)
    - ✅ Memory Opt Patches (25 optimizations)
    - 🔘 LTO Type: `thin` (balanced) / `none` (fastest compile) / `full` (max optimization)
-   - 🔘 Optional features: ∼∼KPM∼∼, NTSync, IPv6 NAT, etc.
-  (⚠️ Warning: After flashing the KPM patch, the device may get stuck on the boot animation. Please do not power it on; wait for a future fix.)
+   - 🔘 Optional features: 〜〜KPM〜〜, NTSync, IPv6 NAT, etc.
+(⚠️ Warning: After flashing the KPM patch, the device may get stuck on the boot animation. Please do not power it on; wait for a future fix.)
 5. Click **"Run workflow"** → Wait ~4-5 minutes
 6. Download `AnyKernel3_*.zip` from artifacts or Telegram
 
