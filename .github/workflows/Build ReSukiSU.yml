@@ -326,7 +326,7 @@ jobs:
           cd kernel_workspace/common
 
           echo "🛠️ Setting up ReSukiSU..."
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/dev/kernel/setup.sh" | bash -s dev
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s main
 
           cd KernelSU
 
