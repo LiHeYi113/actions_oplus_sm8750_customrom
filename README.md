@@ -27,7 +27,7 @@
 | **Kernel Version** | `Linux 6.6` (GKI Android 15) |
 | **Android Version** | `15 VanillaIceCream` (compatible with later versions) |
 | **ROM Compatibility** | **custom rom (CrDroid has been tested and works fine; other custom roms should work in theory—please try them yourself.)** |
-| **Root Solution** | ReSukiSU / SukiSU Ultra / KSU Next (Multi-Manager) |
+| **Root Solution** | ReSukiSU / SukiSU Ultra (Multi-Manager) |
 | **Build System** | GitHub Actions CI/CD (optimized for ~5-6min builds) |
 
 ---
