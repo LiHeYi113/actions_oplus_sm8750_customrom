@@ -1,0 +1,207 @@
+name: Build ReSukiSU LineageOS sm8750
+
+on:
+  workflow_dispatch:
+    inputs:
+      susfs:
+        description: "Enable SuSFS"
+        required: true
+        type: boolean
+        default: true
+      droidspaces:
+        description: "Enable Droidspaces"
+        required: true
+        type: boolean
+        default: true
+      release:
+        description: "Upload build artifact"
+        required: true
+        type: boolean
+        default: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  TZ: Asia/Shanghai
+  KERNEL_REPO: https://github.com/LineageOS/android_kernel_oneplus_sm8750
+  KERNEL_BRANCH: lineage-23.2
+  WORKDIR: kernel_workspace
+  CLANG_DIR: ${{ github.workspace }}/kernel_workspace/clang-r563880c
+  CCACHE_DIR: ${{ github.workspace }}/.ccache-sm8750
+  CCACHE_MAXSIZE: 12G
+  BASE_BUILD_CONFIG: build.config.msm.perf
+  KSU_SETUP_BRANCH: main
+  KSU_BRANCH_NAME: ReSukiSU
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/lib/jvm || true
+          df -h
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache curl flex git \
+            libelf-dev libssl-dev lz4 rsync unzip zstd \
+            python3 python3-pip wget xz-utils jq ca-certificates
+
+      - name: Restore clang cache
+        id: clang-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CLANG_DIR }}
+          key: clang-r563880c-${{ runner.os }}
+
+      - name: Download clang
+        if: steps.clang-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "${CLANG_DIR}"
+          curl -L \
+            "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android16-qpr2-release/clang-r563880c.tar.gz" \
+            -o /tmp/clang-r563880c.tar.gz
+          tar -C "${CLANG_DIR}" -xzf /tmp/clang-r563880c.tar.gz
+          rm -f /tmp/clang-r563880c.tar.gz
+
+      - name: Save clang cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CLANG_DIR }}
+          key: clang-r563880c-${{ runner.os }}
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        id: ccache-restore
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-${{ env.KERNEL_BRANCH }}
+          restore-keys: |
+            ccache-${{ runner.os }}-
+
+      - name: Initialize ccache
+        run: |
+          mkdir -p "${CCACHE_DIR}"
+          ccache -M "${CCACHE_MAXSIZE}"
+          ccache -o compression=true
+          ccache -o compiler_check=none
+          ccache -o hash_dir=false
+          ccache -o direct_mode=true
+          ccache -o depend_mode=false
+          ccache -o base_dir="${{ github.workspace }}"
+          ccache -o sloppiness=file_stat_matches,include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros,locale
+          echo "CCACHE_DIR=${CCACHE_DIR}" >> "$GITHUB_ENV"
+          echo "USE_CCACHE=1" >> "$GITHUB_ENV"
+          echo "${CLANG_DIR}/bin" >> "$GITHUB_PATH"
+          echo "Current ccache status:"
+          ccache -s || true
+
+      - name: Clone official LineageOS kernel
+        run: |
+          mkdir -p "${WORKDIR}"
+          git clone --depth=1 -b "${KERNEL_BRANCH}" "${KERNEL_REPO}" "${WORKDIR}/common"
+
+      - name: Setup ReSukiSU
+        run: |
+          cd "${WORKDIR}/common"
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s "${KSU_SETUP_BRANCH}"
+          cd KernelSU
+          git reset --hard HEAD
+          git clean -fd
+
+          KSU_VERSION_COUNT="$(git rev-list --count HEAD)"
+          KSUVER="$((KSU_VERSION_COUNT + 30700))"
+          echo "KSUVER=${KSUVER}" >> "$GITHUB_ENV"
+          echo "KSU_BRANCH=${KSU_BRANCH_NAME}" >> "$GITHUB_ENV"
+
+          KBUILD_FILE="kernel/Kbuild"
+          if [ ! -f "$KBUILD_FILE" ]; then
+            KBUILD_FILE="kernel/Makefile"
+          fi
+
+          KSU_API_VERSION="$(grep -E "^KSU_VERSION_API[[:space:]]*:=" "$KBUILD_FILE" | cut -d'=' -f2 | tr -d '[:space:]' || true)"
+          if [ -z "$KSU_API_VERSION" ]; then
+            KSU_API_VERSION="$(grep -E "KSU_VERSION[[:space:]]*=" "$KBUILD_FILE" | grep -oE '[0-9]+' | head -n 1 || true)"
+          fi
+          if [ -z "$KSU_API_VERSION" ]; then
+            KSU_API_VERSION="11952"
+          fi
+
+          KSU_COMMIT_HASH="$(git rev-parse --short=8 HEAD)"
+          sed -i '/-DKSU_VERSION_FULL=/d' "$KBUILD_FILE"
+          echo "ccflags-y += -DKSU_VERSION_FULL=\\\"v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@${KSU_BRANCH_NAME}\\\"" >> "$KBUILD_FILE"
+
+          echo "✅ ReSukiSU ready"
+          echo "Version: v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@${KSU_BRANCH_NAME}"
+
+      - name: Enable SuSFS
+        if: ${{ inputs.susfs }}
+        run: |
+          cd "${WORKDIR}/common"
+          echo "SUSFS=true" >> "$GITHUB_ENV"
+          echo "✅ SuSFS enabled"
+
+      - name: Enable Droidspaces
+        if: ${{ inputs.droidspaces }}
+        run: |
+          cd "${WORKDIR}/common"
+          echo "DROIDSPACES=true" >> "$GITHUB_ENV"
+          echo "✅ Droidspaces enabled"
+
+      - name: Build kernel
+        run: |
+          cd "${WORKDIR}/common"
+
+          export PATH="${CLANG_DIR}/bin:${PATH}"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export LLVM=1
+          export LLVM_IAS=1
+          export CC="ccache clang"
+          export HOSTCC="clang"
+          export HOSTCXX="clang++"
+          export AR="llvm-ar"
+          export NM="llvm-nm"
+          export OBJCOPY="llvm-objcopy"
+          export OBJDUMP="llvm-objdump"
+          export READELF="llvm-readelf"
+          export STRIP="llvm-strip"
+          export LD="ld.lld"
+
+          # 如果你的仓库实际 build 入口不是 build/build.sh，
+          # 只改这一段即可。
+          if [ -x "./build/build.sh" ]; then
+            BUILD_CONFIG="${BASE_BUILD_CONFIG}" ./build/build.sh
+          elif [ -x "./build.sh" ]; then
+            BUILD_CONFIG="${BASE_BUILD_CONFIG}" ./build.sh
+          else
+            echo "未找到 build 脚本，请按仓库实际构建方式调整这里。"
+            exit 1
+          fi
+
+      - name: Upload build output
+        if: ${{ inputs.release }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ReSukiSU-LineageOS-sm8750
+          path: |
+            kernel_workspace/common/out/**
+          if-no-files-found: warn
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-${{ env.KERNEL_BRANCH }}
