@@ -324,61 +324,153 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s main
 
           cd KernelSU
+
+          # 清理可能的 Git 冲突
+          git reset --hard HEAD
+          git clean -fd
+
           KSU_VERSION_COUNT=$(git rev-list --count HEAD)
-          export KSUVER=$(expr $KSU_VERSION_COUNT + 37185)
+          export KSUVER=$(expr $KSU_VERSION_COUNT + 30700)
           echo "KSUVER=$KSUVER" >> $GITHUB_ENV
-      
-          # Custom version name (@palaziks) — SukiSU builds KSU_VERSION_FULL in kernel/Makefile
-          KSU_API_VERSION=$(grep -E "^KSU_VERSION[[:space:]]*=" "../Makefile" | cut -d'=' -f2 | tr -d '[:space:]')
-          [ -z "$KSU_API_VERSION" ] && KSU_API_VERSION="12800"
-          KSU_COMMIT_HASH=$(git rev-parse --short=8 HEAD)
+
+          # 更精确的 API 版本检测
+          KBUILD_FILE="kernel/Kbuild"
+          if [ ! -f "$KBUILD_FILE" ]; then
           KBUILD_FILE="kernel/Makefile"
-          [ -f "kernel/Kbuild" ] && KBUILD_FILE="kernel/Kbuild"
-          sed -i 's/-DKSU_VERSION_FULL=[^ ]*//g' "$KBUILD_FILE"
-          sed -i '/KSU_VERSION_FULL/d' "$KBUILD_FILE"
-          cat >> "$KBUILD_FILE" <<EOF
-          ccflags-y += -DKSU_VERSION_FULL=\"v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@palaziks\"
-          EOF
-          echo "✅ SukiSU $KSUVER (v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@palaziks)"
+          fi
+
+          echo "🔍 Extracting API version from $KBUILD_FILE..."
+
+          # 尝试多种方式获取 API 版本
+          KSU_API_VERSION=$(grep -E "^KSU_VERSION_API[[:space:]]*:=" "$KBUILD_FILE" | cut -d'=' -f2 | tr -d '[:space:]')
+
+          if [ -z "$KSU_API_VERSION" ]; then
+          KSU_API_VERSION=$(grep -E "KSU_VERSION[[:space:]]*=" "$KBUILD_FILE" | grep -oP '\d+' | head -1)
+          fi
+
+          if [ -z "$KSU_API_VERSION" ]; then
+          echo "⚠️ Could not auto-detect API version. Using git describe..."
+          KSU_API_VERSION=$(git describe --tags --abbrev=0 | sed 's/v//' | cut -d'.' -f1)
+          fi
+
+          if [ -z "$KSU_API_VERSION" ]; then
+          echo "⚠️ Still failed. Falling back to default (11952)..."
+          KSU_API_VERSION="11952"
+          fi
+
+          KSU_COMMIT_HASH=$(git rev-parse --short=8 HEAD)
+
+          echo "💉 Injecting custom version: v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@palaziks"
+
+          # 安全地修改编译标志
+          sed -i '/-DKSU_VERSION_FULL=/d' "$KBUILD_FILE"
+
+          # 添加新的版本定义
+          echo "ccflags-y += -DKSU_VERSION_FULL=\\\"v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@palaziks\\\"" >> "$KBUILD_FILE"
+
+          echo "✅ ReSukiSU version configured"
+          echo "Version: v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@palaziks"
+
+      - name: 🔧 Fix SUSFS selinux symbol linkage (builtin ReSukiSU)
+        if: github.event.inputs.SUSFS == 'true'
+        working-directory: kernel_workspace/common
+        run: |
+          SERVICES="security/selinux/ss/services.c"
+          RULES="KernelSU/kernel/selinux/rules.c"
+          
+          # 1. Define backup_sepolicy in rules.c
+          sed -i '/^#define ALL NULL/a\\n#ifdef CONFIG_KSU_SUSFS\nstruct selinux_policy *backup_sepolicy;\n#endif' "$RULES"
+          
+          # 2. Assign backup_sepolicy
+          sed -i '/rcu_assign_pointer(selinux_state.policy, pol);/a#ifdef CONFIG_KSU_SUSFS\n    backup_sepolicy = pol;\n#endif' "$RULES"
+          
+          # 3. DO NOT add functions to services.c - they already exist in kernel 6.6+
+          echo "✅ backup_sepolicy configured (skipping _with_policy functions - already in kernel)"
+
+      # ── FIX: Missing static key symbols for MANUAL_HOOK mode ────────────────
+      - name: 🔧 Fix missing KSU static key symbols (SUSFS=false only)
+        if: github.event.inputs.SUSFS != 'true'
+        working-directory: kernel_workspace/common
+        run: |
+          KSUD=$(find . -name "ksud.c" | head -1)
+          if [ -z "$KSUD" ]; then
+            echo "ksud.c not found, skipping"
+            exit 0
+          fi
+          echo "Found: $KSUD"
+      
+          # Replace extern declarations with real definitions (needed when selinux.c block is skipped)
+          sed -i \
+            's|extern struct static_key_false ksu_input_hook_key_false;|struct static_key_false ksu_input_hook_key_false = STATIC_KEY_FALSE_INIT;\nEXPORT_SYMBOL_GPL(ksu_input_hook_key_false);|' \
+            "$KSUD"
+          sed -i \
+            's|extern struct static_key_false ksu_init_rc_hook_key_false;|struct static_key_false ksu_init_rc_hook_key_false = STATIC_KEY_FALSE_INIT;\nEXPORT_SYMBOL_GPL(ksu_init_rc_hook_key_false);|' \
+            "$KSUD"
+      
+          echo "✅ key_false structs defined in ksud.c (SUSFS=false path)"
 
       - name: 🔧 Setup Patches
         run: |
           cd kernel_workspace
-      
-          echo "⬇️ Cloning patch repos..."
-          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
-            git clone --depth=1 -b oki-android15-6.6 https://github.com/cctv18/susfs4oki.git &
+
+          echo "⬇️ Cloning required patch repos..."
+          
+          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then         
+            git clone --depth=1 https://github.com/cctv18/susfs4oki.git -b oki-android15-6.6 &
           fi
           git clone --depth=1 https://github.com/mrcxlinux/kernel_patches.git &
           git clone --depth=1 https://github.com/ReSukiSU/ReSukiSU_Patches.git &
           git clone --depth=1 https://github.com/TheWildJames/kernel_patches.git wildkernels_patches &
           wait
-      
 
+          echo "📝 Copying patch files..."
+          
           if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
-            echo "📝 Staging SUSFS files..."
             cp susfs4oki/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch ./common/
             cp susfs4oki/kernel_patches/fs/* ./common/fs/
             cp susfs4oki/kernel_patches/include/linux/* ./common/include/linux/
-            cp susfs4oki/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./common/KernelSU/
+          else
+            cp kernel_patches/sukisu/scope_min_manual_hooks_v1.9.patch ./common/
+          fi
+
+          cd ./common
+
+          # ── WORKFLOW STRIP AND SED/AWK FIX ────────────────────────────────
+          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
+            echo "🔧 Stripping failing hunk and applying block fixes for task_mmu.c..."
+            
+            # 1. Strip out the specific task_mmu.c file instruction from the patch payload entirely
+            sed -i '/diff --git a\/fs\/proc\/task_mmu.c b\/fs\/proc\/task_mmu.c/,/diff --git/ { /diff --git b/!d }' 50_add_susfs_in_gki-android15-6.6.patch
+            sed -i '/diff --git a\/fs\/proc\/task_mmu.c b\/fs\/proc\/task_mmu.c/d' 50_add_susfs_in_gki-android15-6.6.patch
+
+            # 2. Inject the header safely right below SENTINEL_VMA_GATE
+            sed -i '/#define SENTINEL_VMA_GATE/a #include <linux/susfs.h>' fs/proc/task_mmu.c
+
+            # 3. Cleanly insert the hook logic right before smap_gather_stats using awk
+            awk '
+            /smap_gather_stats\(vma, &mss, last_vma_end\);/ {
+                print "#ifdef CONFIG_KSU_SUSFS_SUS_MAP"
+                print "\t\t\tif (vma->vm_file && SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file))) {"
+                print "\t\t\t\tcontinue;"
+                print "\t\t\t}"
+                print "#endif"
+            }
+            { print }
+            ' fs/proc/task_mmu.c > fs/proc/task_mmu.c.tmp && mv fs/proc/task_mmu.c.tmp fs/proc/task_mmu.c
 
           fi
-      
-          cd ./common
+          # ──────────────────────────────────────────────────────────────────
 
           cp ../kernel_patches/common/EnablePOLLY.patch ./
 
           echo "📦 Enabling POLLY support..."
           git apply -p1 < EnablePOLLY.patch || true
-      
-          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
-            echo "📦 Applying 10_enable_susfs_for_ksu (KSU-side)..."
-            ( cd KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch )
-            echo "📦 Applying 50_add_susfs kernel patch..."
-            patch -p1 < 50_add_susfs_in_gki-android15-6.6.patch
 
+          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
+            echo "📦 Applying SUSFS patch..."
+            patch -p1 < 50_add_susfs_in_gki-android15-6.6.patch
           fi
-      
+
           echo "✅ Base patches applied"
 
       - name: 🔍 Debug Patch Rejection
@@ -399,7 +491,7 @@ jobs:
 
           echo "CONFIG_LLVM_POLLY=y" >> "$DEFCONFIG"
           echo "CONFIG_LD_DEAD_CODE_DATA_ELIMINATION=y" >> "$DEFCONFIG"
-          echo "CONFIG_KSU_MANUAL_HOOK=y" >> "$DEFCONFIG"
+          echo "CONFIG_KSU_KPROBES_HOOK=n" >> "$DEFCONFIG"
 
           if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
             echo "📦 Enabling SUSFS features..."
