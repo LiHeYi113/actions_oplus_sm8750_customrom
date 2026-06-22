@@ -432,7 +432,7 @@ jobs:
           echo "⬇️ Cloning required patch repos..."
           
           if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then         
-            git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android15-6.6 &
+            git clone --depth=1 https://github.com/cctv18/susfs4oki.git -b oki-android15-6.6 &
           fi
           git clone --depth=1 https://github.com/mrcxlinux/kernel_patches.git &
           git clone --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git &
@@ -442,15 +442,40 @@ jobs:
           echo "📝 Copying patch files..."
           
           if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
-            cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch ./common/
-            cp susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./common/
-            cp susfs4ksu/kernel_patches/fs/* ./common/fs/
-            cp susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+            cp susfs4oki/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch ./common/
+            cp susfs4oki/kernel_patches/fs/* ./common/fs/
+            cp susfs4oki/kernel_patches/include/linux/* ./common/include/linux/
           else
             cp kernel_patches/sukisu/scope_min_manual_hooks_v1.9.patch ./common/
           fi
 
           cd ./common
+
+          # ── WORKFLOW STRIP AND SED/AWK FIX ────────────────────────────────
+          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
+            echo "🔧 Stripping failing hunk and applying block fixes for task_mmu.c..."
+            
+            # 1. Strip out the specific task_mmu.c file instruction from the patch payload entirely
+            sed -i '/diff --git a\/fs\/proc\/task_mmu.c b\/fs\/proc\/task_mmu.c/,/diff --git/ { /diff --git b/!d }' 50_add_susfs_in_gki-android15-6.6.patch
+            sed -i '/diff --git a\/fs\/proc\/task_mmu.c b\/fs\/proc\/task_mmu.c/d' 50_add_susfs_in_gki-android15-6.6.patch
+
+            # 2. Inject the header safely right below SENTINEL_VMA_GATE
+            sed -i '/#define SENTINEL_VMA_GATE/a #include <linux/susfs.h>' fs/proc/task_mmu.c
+
+            # 3. Cleanly insert the hook logic right before smap_gather_stats using awk
+            awk '
+            /smap_gather_stats\(vma, &mss, last_vma_end\);/ {
+                print "#ifdef CONFIG_KSU_SUSFS_SUS_MAP"
+                print "\t\t\tif (vma->vm_file && SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file))) {"
+                print "\t\t\t\tcontinue;"
+                print "\t\t\t}"
+                print "#endif"
+            }
+            { print }
+            ' fs/proc/task_mmu.c > fs/proc/task_mmu.c.tmp && mv fs/proc/task_mmu.c.tmp fs/proc/task_mmu.c
+
+          fi
+          # ──────────────────────────────────────────────────────────────────
 
           cp ../kernel_patches/common/EnablePOLLY.patch ./
 
@@ -460,7 +485,6 @@ jobs:
           if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
             echo "📦 Applying SUSFS patch..."
             patch -p1 < 50_add_susfs_in_gki-android15-6.6.patch
-            patch -p1 < 10_enable_susfs_for_ksu.patch
           fi
 
           echo "✅ Base patches applied"
