@@ -1,7 +1,7 @@
 name: SukiSU Ultra OP13 Build
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-6.6.138
+  group: ${{ github.workflow }}-${{ github.ref }}-6.6.139
   cancel-in-progress: true
 
 env:
@@ -9,7 +9,7 @@ env:
   ANDROID_VERSION: 'android15'
   KERNEL_VERSION: '6.6'
   KERNEL_NAME: 'android15-8-g29d86c5fc9dd-abogki428889875-4k'
-  CCACHE_KEY: ccache-neov4-6.6.138
+  CCACHE_KEY: ccache-neov4-6.6.139
 
 on:
   workflow_dispatch:
@@ -176,7 +176,7 @@ jobs:
 
           # Source clone
           echo "Cloning source repository..."
-          curl -L https://github.com/palazik/android_kernel_common_oneplus_sm8750/archive/refs/heads/6.6.138_oneplus13_coloros16.zip \
+          curl -L https://github.com/palazik/android_kernel_common_oneplus_sm8750/archive/refs/heads/6.6.139_oneplus13_coloros16.zip \
             -o common.zip &&
           unzip -q common.zip &&
           mv android_kernel_common_oneplus_sm8750-* common &&
@@ -251,13 +251,13 @@ jobs:
 
       - name: Configure CCache Directory
         run: |
-          echo "CCACHE_DIR=$HOME/.ccache_6.6.138" >> $GITHUB_ENV
-          echo "LDCACHE_DIR=/dev/shm/ldcache_6.6.138" >> $GITHUB_ENV
-          mkdir -p /dev/shm/ldcache_6.6.138
+          echo "CCACHE_DIR=$HOME/.ccache_6.6.139" >> $GITHUB_ENV
+          echo "LDCACHE_DIR=/dev/shm/ldcache_6.6.139" >> $GITHUB_ENV
+          mkdir -p /dev/shm/ldcache_6.6.139
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
           echo "Current Disk Space:"
           df -h
-          echo "Current Build Kernel Version: 6.6.138"
+          echo "Current Build Kernel Version: 6.6.139"
 
       - name: Restore CCache
         uses: actions/cache/restore@v4
@@ -291,7 +291,7 @@ jobs:
           
           echo "Cache miss, attempting to pull public ccache..."
           mkdir -p ${{ env.CCACHE_DIR }}
-          FILE_NAME="ccache-6.6.138.tar.zst"
+          FILE_NAME="ccache-6.6.139.tar.zst"
           
           if gh release download -p "$FILE_NAME" -R cctv18/public_ccache; then
             echo "Successfully downloaded $FILE_NAME, extracting..."
@@ -320,147 +320,82 @@ jobs:
 
           echo "Updating atime to achieve cache eviction..."
           find "${{ env.CCACHE_DIR }}" -type f -exec touch -t $(date -d "1 day ago" +%Y%m%d%H%M) {} + || true
-
+              
       - name: ⚡ Setup SukiSU Ultra
         run: |
           cd kernel_workspace/common
-
-          echo "🛠️ Setting up SukiSU Ultra..."
+          echo "🛠️ Setting up SukiSU Ultra (builtin)..."
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
-
           cd KernelSU
-
           KSU_VERSION_COUNT=$(git rev-list --count HEAD)
           export KSUVER=$(expr $KSU_VERSION_COUNT + 37185)
           echo "KSUVER=$KSUVER" >> $GITHUB_ENV
-
-          # 🔧 修复：检查父目录的 Makefile
-          KSU_MAKEFILE="../Makefile"  # 向上找到 KernelSU/Makefile
-
-          echo "🔍 Extracting API version from $KSU_MAKEFILE..."
-
-          # 优先从 KSU_VERSION 变量获取
-          KSU_API_VERSION=$(grep -E "^KSU_VERSION[[:space:]]*=" "$KSU_MAKEFILE" | cut -d'=' -f2 | tr -d '[:space:]')
-
-          # 备选：从 ccflags 中提取
-          if [ -z "$KSU_API_VERSION" ]; then
-          KSU_API_VERSION=$(grep -oP '(?<=-DKSU_VERSION=)\d+' "$KSU_MAKEFILE" | head -1)
-          fi
-
-          # 再次备选：从 kernel 子目录的 Makefile 中查找
-          if [ -z "$KSU_API_VERSION" ] && [ -f "kernel/Makefile" ]; then
-          KSU_API_VERSION=$(grep -E "KSU_VERSION_API[[:space:]]*:=" "kernel/Makefile" | cut -d'=' -f2 | tr -d '[:space:]')
-          fi
-
-          if [ -z "$KSU_API_VERSION" ]; then
-          echo "⚠️ Could not auto-detect API version. Falling back to default (11952)..."
-          KSU_API_VERSION="11952"
-          fi
-
+      
+          # Custom version name (@palaziks) — SukiSU builds KSU_VERSION_FULL in kernel/Makefile
+          KSU_API_VERSION=$(grep -E "^KSU_VERSION[[:space:]]*=" "../Makefile" | cut -d'=' -f2 | tr -d '[:space:]')
+          [ -z "$KSU_API_VERSION" ] && KSU_API_VERSION="12800"
           KSU_COMMIT_HASH=$(git rev-parse --short=8 HEAD)
-
-          echo "💉 Injecting custom version: v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@palaziks"
-
-          # 现在修改正确的 kernel/Makefile（这是编译时实际使用的）
           KBUILD_FILE="kernel/Makefile"
-          if [ -f "kernel/Kbuild" ]; then
-          KBUILD_FILE="kernel/Kbuild"
-          fi
-
+          [ -f "kernel/Kbuild" ] && KBUILD_FILE="kernel/Kbuild"
           sed -i 's/-DKSU_VERSION_FULL=[^ ]*//g' "$KBUILD_FILE"
           sed -i '/KSU_VERSION_FULL/d' "$KBUILD_FILE"
-
           cat >> "$KBUILD_FILE" <<EOF
-
           ccflags-y += -DKSU_VERSION_FULL=\"v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@palaziks\"
           EOF
-
-          echo "✅ SukiSU Ultra version configured"
-
-      - name: 🔧 Fix SUSFS selinux symbol linkage (builtin SukiSU)
-        if: github.event.inputs.SUSFS == 'true'
-        working-directory: kernel_workspace/common
-        run: |
-          SERVICES="security/selinux/ss/services.c"
-          RULES="KernelSU/kernel/selinux/rules.c"
-          
-          # 1. Define backup_sepolicy in rules.c
-          sed -i '/^#define ALL NULL/a\\n#ifdef CONFIG_KSU_SUSFS\nstruct selinux_policy *backup_sepolicy;\n#endif' "$RULES"
-          
-          # 2. Assign backup_sepolicy
-          sed -i '/rcu_assign_pointer(selinux_state.policy, pol);/a#ifdef CONFIG_KSU_SUSFS\n    backup_sepolicy = pol;\n#endif' "$RULES"
-          
-          # 3. DO NOT add functions to services.c - they already exist in kernel 6.6+
-          echo "✅ backup_sepolicy configured (skipping _with_policy functions - already in kernel)"
-      
-      - name: 🔧 Fix sulog USER_ARG_NULL compile error
-        working-directory: kernel_workspace/common/drivers/kernelsu/sulog
-        run: |
-          if grep -q "USER_ARG_NULL" event.c; then
-            sed -i 's/ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, USER_ARG_NULL,/ksu_sulog_capture(KSU_SULOG_EVENT_IOCTL_GRANT_ROOT, NULL, NULL,/' event.c
-            echo "✅ sulog USER_ARG_NULL fixed"
-          else
-            echo "Already clean, skipping"
-          fi
-
-      # ── FIX: Missing static key symbols for MANUAL_HOOK mode ────────────────
-      - name: 🔧 Fix missing KSU static key symbols (SUSFS=false only)
-        if: github.event.inputs.SUSFS != 'true'
-        working-directory: kernel_workspace/common
-        run: |
-          KSUD=$(find . -name "ksud.c" | head -1)
-          if [ -z "$KSUD" ]; then
-            echo "ksud.c not found, skipping"
-            exit 0
-          fi
-          echo "Found: $KSUD"
-      
-          # Replace extern declarations with real definitions (needed when selinux.c block is skipped)
-          sed -i \
-            's|extern struct static_key_false ksu_input_hook_key_false;|struct static_key_false ksu_input_hook_key_false = STATIC_KEY_FALSE_INIT;\nEXPORT_SYMBOL_GPL(ksu_input_hook_key_false);|' \
-            "$KSUD"
-          sed -i \
-            's|extern struct static_key_false ksu_init_rc_hook_key_false;|struct static_key_false ksu_init_rc_hook_key_false = STATIC_KEY_FALSE_INIT;\nEXPORT_SYMBOL_GPL(ksu_init_rc_hook_key_false);|' \
-            "$KSUD"
-      
-          echo "✅ key_false structs defined in ksud.c (SUSFS=false path)"
+          echo "✅ SukiSU $KSUVER (v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@palaziks)"
 
       - name: 🔧 Setup Patches
         run: |
           cd kernel_workspace
-
-          echo "⬇️ Cloning required patch repos..."
-
-          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then         
-            git clone --depth=1 https://github.com/cctv18/susfs4oki.git -b oki-android15-6.6 &
+          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
+            git clone --depth=1 -b gki-android15-6.6 https://gitlab.com/simonpunk/susfs4ksu.git &
           fi
           git clone --depth=1 https://github.com/mrcxlinux/kernel_patches.git &
           git clone --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git &
           git clone --depth=1 https://github.com/TheWildJames/kernel_patches.git wildkernels_patches &
           wait
 
-          echo "📝 Copying patch files..."
-
           if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
-            cp susfs4oki/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch ./common/
-            cp susfs4oki/kernel_patches/fs/* ./common/fs/
-            cp susfs4oki/kernel_patches/include/linux/* ./common/include/linux/
-          else
-            cp kernel_patches/sukisu/scope_min_manual_hooks_v1.9.patch ./common/
+            cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch ./common/
+            cp susfs4ksu/kernel_patches/fs/* ./common/fs/
+            cp susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+            # NO 10_ — SukiSU/ReSukiSU have SUSFS KSU-side integration in-source.
+            # (fatalcoder's production OnePlus v2.2.0 build applies 50_ only.)
           fi
 
           cd ./common
-
           cp ../kernel_patches/common/EnablePOLLY.patch ./
-
-          echo "📦 Enabling POLLY support..."
           git apply -p1 < EnablePOLLY.patch || true
 
           if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
-            echo "📦 Applying SUSFS patch..."
-            patch -p1 < 50_add_susfs_in_gki-android15-6.6.patch || true
-          fi
+            echo "📦 Pre-patch fixups (fatalcoder android15-6.6 method)..."
+            # nr_subpages
+            if ! grep -qxF $'\tunsigned int nr_subpages = __PAGE_SIZE / PAGE_SIZE;' ./fs/proc/task_mmu.c; then
+              sed -i -e '/int ret = 0, copied = 0;/a \\tunsigned int nr_subpages \= __PAGE_SIZE \/ PAGE_SIZE;' \
+                     -e '/int ret = 0, copied = 0;/a \\tpagemap_entry_t \*res = NULL;' ./fs/proc/task_mmu.c
+            fi
+            # base.c dma-buf
+            if ! grep -qxF '#include <linux/dma-buf.h>' ./fs/proc/base.c; then
+              sed -i '/#include <linux\/cpufreq_times.h>/a #include <linux\/dma-buf.h>' ./fs/proc/base.c
+            fi
+            # memory.c zswap
+            if ! grep -qxF '#include <linux/zswap.h>' ./mm/memory.c; then
+              sed -i '/#include <linux\/sched\/sysctl\.h>/a #include <linux\/zswap.h>' ./mm/memory.c
+            fi
+            # task_mmu last_vma_end: expand ONLY if unbraced (your tree is already braced → skipped)
+            if grep -qF 'if (vma->vm_end > last_vma_end)' ./fs/proc/task_mmu.c \
+               && ! grep -qF 'if (vma->vm_end > last_vma_end) {' ./fs/proc/task_mmu.c; then
+              perl -i -0pe 's/\t\t\tif \(vma->vm_end > last_vma_end\)\n\t\t\t\tsmap_gather_stats\(vma, &mss, last_vma_end\);/\t\t\tif (vma->vm_end > last_vma_end) {\n\t\t\t\tsmap_gather_stats(vma, \&mss, last_vma_end);\n\t\t\t\tlast_vma_end = vma->vm_end;\n\t\t\t}/' ./fs/proc/task_mmu.c
+            fi
 
+            echo "📦 Applying 50_ with --forward (by-design rejects skip cleanly)..."
+            patch -p1 --forward < 50_add_susfs_in_gki-android15-6.6.patch || true
+
+            # Verify the SUS_MAP guard actually landed (real correctness check, not error-ignoring)
+            grep -q "SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file))" fs/proc/task_mmu.c \
+              || { echo "❌ SUS_MAP guard missing — real failure"; exit 1; }
+            echo "✅ SUSFS applied (fatalcoder method)"
+          fi
           echo "✅ Base patches applied"
 
       - name: ⚙️ Configure Kernel Options
@@ -470,6 +405,7 @@ jobs:
           echo "CONFIG_KSU=y" >> "$DEFCONFIG"
           echo "CONFIG_TMPFS_XATTR=y" >> "$DEFCONFIG"
           echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$DEFCONFIG"
+      
           if [[ "${{ github.event.inputs.lz4kd_enable }}" == "true" ]]; then
             echo "CONFIG_ZSMALLOC=y" >> "$DEFCONFIG"
             echo "CONFIG_CRYPTO_LZ4HC=y" >> "$DEFCONFIG"
@@ -477,14 +413,15 @@ jobs:
             echo "CONFIG_CRYPTO_LZ4KD=y" >> "$DEFCONFIG"
             echo "CONFIG_CRYPTO_842=y" >> "$DEFCONFIG"
           fi
+          
           echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> "$DEFCONFIG"
           sed -i 's/check_defconfig//' ./common/build.config.gki
           echo "CONFIG_HEADERS_INSTALL=n" >> "$DEFCONFIG"
-
+      
           echo "CONFIG_LLVM_POLLY=y" >> "$DEFCONFIG"
           echo "CONFIG_LD_DEAD_CODE_DATA_ELIMINATION=y" >> "$DEFCONFIG"
-          echo "CONFIG_KSU_KPROBES_HOOK=n" >> "$DEFCONFIG"
-
+          echo "CONFIG_KSU_MANUAL_HOOK=y" >> "$DEFCONFIG"
+      
           if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
             echo "📦 Enabling SUSFS features..."
             echo "CONFIG_KSU_SUSFS=y" >> "$DEFCONFIG"
@@ -802,7 +739,7 @@ jobs:
         working-directory: kernel_workspace
         run: |
           echo "CONFIG_WIREGUARD=y" >> common/arch/arm64/configs/gki_defconfig
-      
+
       - name: Enable Wakelock Blocker
         if: inputs.wakelock_blocker
         working-directory: kernel_workspace/common
@@ -902,13 +839,13 @@ jobs:
 
           # RAM disk for build output (15GB RAM available, safe to use)
           mkdir -p /dev/shm/kout
-          mkdir -p /dev/shm/ldcache_6.6.138
+          mkdir -p /dev/shm/ldcache_6.6.139
 
           cd kernel_workspace/common
 
           # LTO thin cache wrapper pointing to RAM disk
           echo '#!/bin/bash' > ld-wrapper
-          echo 'ld.lld "$@" --thinlto-cache-dir=/dev/shm/ldcache_6.6.138 --thinlto-jobs=$(($(nproc --all) / 2))' >> ld-wrapper
+          echo 'ld.lld "$@" --thinlto-cache-dir=/dev/shm/ldcache_6.6.139 --thinlto-jobs=$(($(nproc --all) / 2))' >> ld-wrapper
           chmod +x ld-wrapper
 
           wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfakestat.so || true
@@ -945,7 +882,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-neov4-6.6.138-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          key: ccache-neov4-6.6.139-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
 
       - name: 📦 Save LTO CCache
         if: success() && inputs.lto_type == 'thin'
@@ -954,16 +891,6 @@ jobs:
           path: ${{ env.LDCACHE_DIR }}
           key: lto-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
           
-      - name: 🧩 Patch Kernel Image (KPM)
-        if: inputs.KPM
-        run: |
-          cd /dev/shm/kout/arch/arm64/boot
-          curl -LO https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.13.0/patch_linux
-          chmod +x patch_linux
-          ./patch_linux
-          rm -f Image
-          mv oImage Image
-
       - name: 🧠 Package AK3 ZIP
         id: create_zip
         run: |
@@ -980,8 +907,8 @@ jobs:
           if [[ "${{ github.event.inputs.lz4kd_enable }}" == "true" ]]; then
             wget https://raw.githubusercontent.com/$GITHUB_REPOSITORY/refs/heads/$GITHUB_REF_NAME/zram.zip || true
           fi
-          AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_6.6.138_palaziks-ShiftPorts.zip
-          FULL_VERSION=6.6.138-palaziks-ShiftPorts
+          AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_6.6.139_palaziks-ShiftPorts.zip
+          FULL_VERSION=6.6.139-palaziks-ShiftPorts
           zip -r ../$AK3_NAME ./*
           echo "ak3name=$AK3_NAME" >> $GITHUB_OUTPUT
           
@@ -996,6 +923,7 @@ jobs:
           echo "KSU Branch: ${KSU_TYPENAME}" >> ./ak3.log
           echo "KSU Ver: ${KSUVER}" >> ./ak3.log
           echo "SuSFS: ${{ github.event.inputs.SUSFS }}" >> ./ak3.log
+          echo "KPM: ${{ github.event.inputs.KPM }}" >> ./ak3.log
           echo "LZ4: ${{ github.event.inputs.lz4_enable }}" >> ./ak3.log
           echo "LZ4KD: ${{ github.event.inputs.lz4kd_enable }}" >> ./ak3.log
           echo "BBR&Brutal: ${{ github.event.inputs.bbr_enable }}" >> ./ak3.log
@@ -1043,12 +971,12 @@ jobs:
         run: |
           DATE=$(date +"%Y-%m-%d %H:%M:%S %Z")
           COMMIT_HASH=$(echo "${{ github.sha }}" | cut -c1-8)
-          COMMIT_MSG="Workflow Dispatch: 6.6.138"
+          COMMIT_MSG="Workflow Dispatch: 6.6.139"
           REPO_URL="https://github.com/${{ github.repository }}"
           RUN_URL="$REPO_URL/actions/runs/${{ github.run_id }}"
           TIME_NOW="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
 
-          export TG_KERNEL_VERSION="6.6.138"
+          export TG_KERNEL_VERSION="6.6.139"
           export TG_KSU_DISPLAY="SukiSU Ultra"
           export TG_KSUVER="${{ env.KSUVER }}"
           export TG_SUFFIX="palaziks-ShiftPorts"
@@ -1235,13 +1163,13 @@ jobs:
 
       - name: Set Environment Variables
         run: |
-          FULL_VERSION=6.6.138-palaziks-ShiftPorts
+          FULL_VERSION=6.6.139-palaziks-ShiftPorts
           echo "FULL_VERSION=$FULL_VERSION" >> $GITHUB_ENV
           TIME="$(TZ='Asia/Shanghai' date +'%y%m%d%H%M%S')"
           TIME_FORM="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
           echo "TIME=$TIME" >> $GITHUB_ENV
           echo "TIME_FORM=$TIME_FORM" >> $GITHUB_ENV
-          TAG_HEAD="OPPO-OPlus-Realme-build"
+          TAG_HEAD="OPlus-SukiSU_Ultra-SM8750-CustomRom-KernelBuild"
           echo "TAG_HEAD=$TAG_HEAD" >> $GITHUB_ENV
           KSU_TYPENAME="SukiSU Ultra"
           echo "KSU_TYPENAME=$KSU_TYPENAME" >> $GITHUB_ENV
@@ -1253,7 +1181,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cat << 'EOF' > release_notes.md
-          ### 📱 OnePlus 13 SukiSU Ultra SM8750 CustomRom-KernelBuild (Compiling AOSP-Clang)
+          ### 📱 OPlus SukiSU Ultra SM8750 CustomRom-KernelBuild (Compiling AOSP-Clang)
           - **Kernel Version:** ${{ env.FULL_VERSION }}
           - **Build Time:** ${{ env.TIME_FORM }}
           - **KSU Branch:** SukiSU Ultra
@@ -1277,8 +1205,8 @@ jobs:
           - **WireGuard:** ${{ github.event.inputs.wireguard }}
           - **Wakelock Blocker:** ${{ github.event.inputs.wakelock_blocker }}
           - **Tested devices and systems:**
-              OnePlus Pad 3/OnePlus Pad 2 Pro [crDroidAndroid-16.0-20260531-erhai-v12.10]
-              OnePlus 13 [crDroidAndroid-16.0-20260531-dodge-v12.10]
+              OnePlus Pad 3/OnePlus Pad 2 Pro [crDroidAndroid-16.0-20260622-erhai-v12.11]
+              OnePlus 13 [crDroidAndroid-16.0-20260622-dodge-v12.11]
           - **For other SM8750 models, please test these custom ROMs yourself and back up the boot partition and other partitions just in case.**
           EOF
 
