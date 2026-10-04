@@ -6,7 +6,7 @@
         <small>Stability-focused OGKI (aka OKI) 6.6 kernel for OnePlus 13 (SM8750)</small>
       </p>
       <p align="center" style="font-size:12px; margin-top: 0; margin-bottom: 20px;">
-        <i>ReSukiSU &amp; KernelSU Next &amp; KernelSU &amp; SukiSU Ultra</i>
+        <i>BakaSU &amp; KernelSU Next &amp; KernelSU &amp; SukiSU Ultra</i>
       </p>
     </summary>
   </ul>
@@ -29,7 +29,7 @@
 | **Chipset** | `SM8750` \| Snapdragon 8 Elite \| sun |
 | **Android Version** | `15 VanillaIceCream` (compatible with later versions) |
 | **ROM Compatibility** | OxygenOS / ColorOS **or** AOSP — one build per ROM type ([see below](#-rom-compatibility)) |
-| **Root Solution** | ReSukiSU / KSU Next / KSU / SukiSU Ultra |
+| **Root Solution** | BakaSU / KSU Next / KSU / SukiSU Ultra |
 | **Build System** | GitHub Actions CI/CD (optimized for ~5-6min builds) |
 
 ---
@@ -156,7 +156,7 @@
    - ColorOS / OxygenOS → **OP13 Kernel Build**
    - AOSP-based ROMs → **OP13 Kernel AOSP Build**
 4. Hit **"Run workflow"** and configure options:
-   - 🔘 **KSU type**: `ReSukiSU` (default) / `SukiSU Ultra` / `KernelSU` / `KernelSU Next`
+   - 🔘 **KSU type**: `BakaSU` (default) / `SukiSU Ultra` / `KernelSU` / `KernelSU Next`
    - ✅ SuSFS (recommended for hiding)
    - ✅ Fengchi (performance scheduler)
    - ✅ Memory Opt Patches (24 optimizations)
