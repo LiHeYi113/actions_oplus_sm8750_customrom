@@ -1,1 +1,616 @@
-fcf
+name: 6.12.23 TEST OP13 Build
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-6.12.23
+  cancel-in-progress: true
+
+env:
+  TZ: Asia/Shanghai
+  ANDROID_VERSION: 'android16'
+  KERNEL_VERSION: '6.12'
+  KERNEL_NAME: 'android16-8-g29d86c5fc9dd-abogki428889875-4k'
+  CCACHE_KEY: ccache-neov4-6.12.23
+
+on:
+  workflow_dispatch:
+    inputs:
+      SUSFS:
+        description: 'Enable SuSFS (Enhances hide environment)'
+        required: true
+        type: boolean
+        default: true      
+        
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      ksuver: ${{ steps.ksu_version.outputs.ksuver }}
+      ak3name: ${{ steps.create_zip.outputs.ak3name }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: 🧠 Add swap space (for LTO link)
+        run: |
+          sudo fallocate -l 16G /mnt/swap_lto || sudo dd if=/dev/zero of=/mnt/swap_lto bs=1M count=16384
+          sudo chmod 600 /mnt/swap_lto
+          sudo mkswap /mnt/swap_lto
+          sudo swapon /mnt/swap_lto
+          echo "── swap after ──"; free -h
+
+      - name: Cache Clang
+        id: clang-cache
+        uses: actions/cache@v4
+        with:
+          path: kernel_workspace/zyc-clang
+          key: zyc-clang-19.0.0git-20240723
+
+      - name: Cache build-tools
+        id: buildtools-cache
+        uses: actions/cache@v4
+        with:
+          path: kernel_workspace/build-tools
+          key: aosp-kernel-build-tools-main-v1
+
+      - name: Cache Rust toolchain
+        id: rust-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.rustup/toolchains/1.82.0-x86_64-unknown-linux-gnu
+            ~/.cargo/bin/bindgen
+          key: rust-1.82.0-bindgen-0.71.1
+
+      - name: Install dependencies & Init Source
+        run: |
+          echo "Relocating heavy folders for background deletion..."
+          sudo mv /usr/share/dotnet /usr/share/dotnet_trash 2>/dev/null || true
+          sudo mv /usr/local/lib/android /usr/local/lib/android_trash 2>/dev/null || true
+          sudo mv /opt/ghc /opt/ghc_trash 2>/dev/null || true
+          sudo mv /usr/lib/jvm /usr/lib/jvm_trash 2>/dev/null || true
+          (sudo nice -n 19 ionice -c 3 rm -rf /usr/share/dotnet_trash /usr/local/lib/android_trash /opt/ghc_trash /usr/lib/jvm_trash) &
+
+          rm -rf kernel_workspace/common kernel_workspace/out 2>/dev/null || true
+          mkdir -p kernel_workspace/zyc-clang kernel_workspace/build-tools
+          cd kernel_workspace
+
+          # apt — stripped to bare minimum, no purge/man-db waste
+          sudo apt-get install -y --no-install-recommends -o Dpkg::Use-Pty=0 \
+            libelf-dev dos2unix pahole cmake llvm-dev libclang-dev &
+
+          # Source clone
+          echo "Cloning source repository..."
+          curl -L https://github.com/palazik/android_kernel_common_oneplus_sm8750/archive/refs/heads/6.12.23_oneplus13_coloros16.zip \
+            -o common.zip &&
+          unzip -q common.zip &&
+          mv android_kernel_common_oneplus_sm8750-* common &&
+          rm -f common.zip &
+
+          # Clang — only download if cache missed
+          if [ "${{ steps.clang-cache.outputs.cache-hit }}" != "true" ]; then
+            echo "Cache miss — downloading ZyCromerZ Clang 19..."
+            mkdir -p zyc-clang
+            aria2c -x16 -s16 -k1M -j16 --retry-wait=5 --max-tries=10 \
+              -d /tmp -o zyc-clang.tar.gz \
+              "https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240723-release/Clang-19.0.0git-20240723.tar.gz"
+            tar -C zyc-clang -zxf /tmp/zyc-clang.tar.gz
+            rm -f /tmp/zyc-clang.tar.gz
+          else
+            echo "Clang restored from cache, skipping download."
+          fi &
+
+          if [ "${{ steps.buildtools-cache.outputs.cache-hit }}" != "true" ]; then
+            echo "Downloading AOSP kernel build-tools (recent pahole)..."
+            mkdir -p build-tools/linux-x86
+            curl -L --retry 3 \
+              "https://android.googlesource.com/kernel/prebuilts/build-tools/+archive/refs/heads/main/linux-x86.tar.gz" \
+              | tar -xz -C build-tools/linux-x86
+          else
+            echo "build-tools restored from cache."
+          fi &
+
+          wait
+
+          echo "Removing ABI protection & dirty suffix..."
+          rm common/android/abi_gki_protected_exports_* || true
+          for f in common/scripts/setlocalversion; do
+            sed -i 's/ -dirty//g' "$f"
+            sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' "$f"
+          done
+
+          echo "Source and tools initialized successfully!"
+
+      - name: Cache ccache-ECS binary
+        uses: actions/cache@v4
+        id: ecs-cache
+        with:
+          path: /tmp/ccache-ecs-bin
+          key: ccache-ecs-${{ runner.os }}-084a7620
+
+      - name: Build & Install ccache-ECS
+        run: |
+          if [ -f /tmp/ccache-ecs-bin/ccache ]; then
+            echo "ECS binary cached, skipping build"
+            sudo cp /tmp/ccache-ecs-bin/ccache /usr/local/bin/ccache
+          else
+            sudo apt-get install -y --no-install-recommends cmake
+            git clone --depth=1 https://github.com/cctv18/ccache-ECS.git /tmp/ccache-ecs
+            cd /tmp/ccache-ecs
+            # Без CMAKE_GENERATOR — использует make, ninja не нужен
+            # DEPS=DOWNLOAD внутри build-binary — cmake сам скачивает zstd/hiredis
+            ./ci/build-binary
+            mkdir -p /tmp/ccache-ecs-bin
+            cp install/ccache /tmp/ccache-ecs-bin/ccache
+            sudo cp /tmp/ccache-ecs-bin/ccache /usr/local/bin/ccache
+          fi
+          sudo chmod 755 /usr/local/bin/ccache
+          echo "/usr/local/bin" >> $GITHUB_PATH
+          echo "✅ ECS ccache: $(/usr/local/bin/ccache --version | head -1)"
+
+      - name: Save ccache-ECS binary cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: /tmp/ccache-ecs-bin
+          key: ccache-ecs-${{ runner.os }}-084a7620
+
+      - name: Configure CCache Directory
+        run: |
+          echo "CCACHE_DIR=$HOME/.ccache_6.12.23" >> $GITHUB_ENV
+          echo "LDCACHE_DIR=$GITHUB_WORKSPACE/ldcache_6.12.23" >> $GITHUB_ENV
+          mkdir -p $GITHUB_WORKSPACE/ldcache_6.12.23
+          echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
+          echo "Current Disk Space:"
+          df -h
+          echo "Current Build Kernel Version: 6.12.23"
+
+      - name: Restore CCache
+        uses: actions/cache/restore@v4
+        id: ccache-restore
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }}-
+            ${{ env.CCACHE_KEY }}-${{ runner.os }}-
+            ${{ env.CCACHE_KEY }}-
+
+      - name: Restore LTO Cache
+        uses: actions/cache/restore@v4
+        if: inputs.lto_type == 'thin'
+        with:
+          path: ${{ env.LDCACHE_DIR }}
+          key: lto-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            lto-cache-${{ runner.os }}-${{ github.ref_name }}-
+
+      - name: Pull Public CCache
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Checking local cache status..."
+          if [ -d "${{ env.CCACHE_DIR }}" ] && [ "$(ls -A ${{ env.CCACHE_DIR }} 2>/dev/null)" ]; then
+            echo "Local cache loaded successfully, skipping public cache pull!"
+            exit 0
+          fi
+          
+          echo "Cache miss, attempting to pull public ccache..."
+          mkdir -p ${{ env.CCACHE_DIR }}
+          FILE_NAME="ccache-6.12.23.tar.zst"
+          
+          if gh release download -p "$FILE_NAME" -R cctv18/public_ccache; then
+            echo "Successfully downloaded $FILE_NAME, extracting..."
+            tar -I zstd -xf "$FILE_NAME" -C ${{ env.CCACHE_DIR }}
+            echo "Public ccache restored successfully!"
+          else
+            echo "Public ccache not found, proceeding with full clean build..."
+          fi
+      
+      - name: Init and Config CCache
+        run: |
+          export CCACHE_DIR="${{ env.CCACHE_DIR }}"
+          mkdir -p "$CCACHE_DIR"
+
+          ccache -M "${{ env.CCACHE_MAXSIZE }}"
+          ccache -o compression=true
+          ccache -o compiler_check=none
+          ccache -o hash_dir=false
+          ccache -o direct_mode=true
+          ccache -o depend_mode=false
+          ccache -o base_dir="${{ github.workspace }}"
+          ccache -o sloppiness=file_stat_matches,include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros,locale
+
+          echo "Initial CCache status:"
+          ccache -s
+
+          echo "Updating atime to achieve cache eviction..."
+          find "${{ env.CCACHE_DIR }}" -type f -exec touch -t $(date -d "1 day ago" +%Y%m%d%H%M) {} + || true
+              
+      - name: 🦀 Setup Rust toolchain (CONFIG_RUST=y)
+        run: |
+          rustup toolchain install 1.82.0 --profile minimal \
+            --component rust-src,rustfmt --no-self-update
+          rustup default 1.82.0
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          if [ ! -x "$HOME/.cargo/bin/bindgen" ]; then
+            cargo install --locked --version 0.71.1 bindgen-cli
+          fi
+          echo "── rust toolchain ──"
+          rustc --version
+          bindgen --version
+          SRC="$(rustc --print sysroot)/lib/rustlib/src/rust/library"
+          [ -d "$SRC" ] && echo "rust-src OK: $SRC" || { echo "❌ rust-src missing"; exit 1; }
+
+      - name: ⚡ Setup BakaSU
+        run: |
+          cd kernel_workspace/common
+          echo "🛠️ Setting up BakaSU (main)..."
+          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/refs/heads/main/kernel/setup.sh" | bash -s main
+          cd KernelSU
+          KSU_VERSION_COUNT=$(git rev-list --count HEAD)
+          export KSUVER=$(expr $KSU_VERSION_COUNT + 37185)
+          echo "KSUVER=$KSUVER" >> $GITHUB_ENV
+          echo "✅ BakaSU $(git rev-parse --short HEAD) (ver $KSUVER)"
+
+      - name: 🔧 Setup Patches
+        run: |
+          cd kernel_workspace
+          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
+            git clone --depth=1 -b gki-android16-6.12 https://gitlab.com/simonpunk/susfs4ksu.git &
+          fi
+          git clone --depth=1 https://github.com/mrcxlinux/kernel_patches.git &
+          git clone --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git &
+          git clone --depth=1 https://github.com/palazik/kernel_patches.git wildkernels_patches &
+          wait
+
+          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
+            cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-android16-6.12.patch ./common/
+            cp susfs4ksu/kernel_patches/fs/* ./common/fs/
+            cp susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+            # NO 10_ — SukiSU/BakaSU have SUSFS KSU-side integration in-source.
+            # (fatalcoder's production OnePlus v2.2.0 build applies 50_ only.)
+          fi
+
+          cd ./common
+
+          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
+            echo "📦 Applying 50_ with --forward (by-design rejects skip cleanly)..."
+            patch -p1 --forward < 50_add_susfs_in_gki-android16-6.12.patch || true
+
+            # Verify the SUS_MAP guard actually landed (real correctness check, not error-ignoring)
+            grep -q "SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file))" fs/proc/task_mmu.c \
+              || { echo "❌ SUS_MAP guard missing — real failure"; exit 1; }
+            echo "✅ SUSFS applied (fatalcoder method)"
+          fi
+          echo "✅ Base patches applied"
+
+      - name: ⚙️ Configure Kernel Options
+        run: |
+          cd kernel_workspace
+          DEFCONFIG="./common/arch/arm64/configs/gki_defconfig"
+          echo "CONFIG_KSU=y" >> "$DEFCONFIG"
+          echo "CONFIG_TMPFS_XATTR=y" >> "$DEFCONFIG"
+          echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$DEFCONFIG"
+      
+          echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> "$DEFCONFIG"
+          sed -i 's/check_defconfig//' ./common/build.config.gki
+          echo "CONFIG_HEADERS_INSTALL=n" >> "$DEFCONFIG"
+      
+          # BakaSU custom version name (@palaziks) via its format-string config:
+          echo 'CONFIG_KSU_FULL_NAME_FORMAT="v%KSU_VERSION%-%COMMIT_SHA%@palaziks"' >> "$DEFCONFIG"
+      
+          # SUSFS on => BakaSU auto-selects SuSFS Inline hook. Do NOT set CONFIG_KSU_MANUAL_HOOK.
+          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
+            echo "📦 Enabling SUSFS features..."
+            echo "CONFIG_KSU_SUSFS=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_SUS_MAP=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> "$DEFCONFIG"
+          fi
+
+      - name: Enable WireGuard
+        working-directory: kernel_workspace
+        run: |
+          echo "CONFIG_WIREGUARD=y" >> common/arch/arm64/configs/gki_defconfig
+
+      - name: Configure LTO
+        run: |
+          cd kernel_workspace
+          echo "CONFIG_LTO_CLANG_THIN=y" >> ./common/arch/arm64/configs/gki_defconfig
+
+      - name: Configure Baseband Guard
+        run: |
+          cd kernel_workspace
+          echo "CONFIG_BBG=y" >> ./common/arch/arm64/configs/gki_defconfig
+          cd ./common
+          curl -sSL https://github.com/cctv18/Baseband-guard/raw/master/setup.sh | bash
+          sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
+
+      - name: 📦 Add build name
+        run: |
+          cd kernel_workspace
+          sudo sed -i "s/-4k/-palaziks-ShiftPorts/g" ./common/arch/arm64/configs/gki_defconfig
+          sed -i 's/${scm_version}//' ./common/scripts/setlocalversion
+          echo "CONFIG_LOCALVERSION_AUTO=n" >> ./common/arch/arm64/configs/gki_defconfig
+
+      - name: 🔨 Build Kernel
+        run: |
+          WORKDIR="$(pwd)"
+          export MAP="-fdebug-prefix-map=${GITHUB_WORKSPACE}=. -fmacro-prefix-map=${GITHUB_WORKSPACE}=. -ffile-prefix-map=${GITHUB_WORKSPACE}=."
+          export PATH="$WORKDIR/kernel_workspace/zyc-clang/bin:$WORKDIR/kernel_workspace/build-tools/linux-x86/bin:$PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+          export LIBCLANG_PATH="${LIBCLANG_PATH:-$WORKDIR/kernel_workspace/zyc-clang/lib}"
+          export PAHOLE="$WORKDIR/kernel_workspace/build-tools/linux-x86/bin/pahole"
+          CLANG_DIR="$WORKDIR/kernel_workspace/zyc-clang/bin"
+          echo "Clang: $($CLANG_DIR/clang --version | head -n 1)"
+          echo "LLD:   $($CLANG_DIR/ld.lld --version | head -n 1)"
+          pahole --version 2>/dev/null || echo "Pahole: Not Installed"
+
+          export CCACHE_DIR="${{ env.CCACHE_DIR }}"
+          export CCACHE_LOGFILE="${{ github.workspace }}/kernel_workspace/ccache.log"
+          export CCACHE_IS_KERNEL_COMPILING=true
+
+          # RAM disk for build output (15GB RAM available, safe to use)
+          mkdir -p $GITHUB_WORKSPACE/kout
+          mkdir -p $GITHUB_WORKSPACE/ldcache_6.12.23
+
+          cd kernel_workspace/common
+
+          # LTO thin cache wrapper pointing to RAM disk
+          echo '#!/bin/bash' > ld-wrapper
+          echo 'ld.lld "$@" --thinlto-cache-dir=$GITHUB_WORKSPACE/ldcache_6.12.23 --thinlto-jobs=$(($(nproc --all) / 2))' >> ld-wrapper
+          chmod +x ld-wrapper
+
+          wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfakestat.so || true
+          wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfaketimeMT.so || true
+          chmod 777 ./*.so || true
+          SO_DIR=$(pwd)
+          export FAKESTAT="2025-05-25 12:00:00"
+          export FAKETIME="@2025-05-25 13:00:00"
+          export PRELOAD_LIBS="$SO_DIR/libfakestat.so $SO_DIR/libfaketimeMT.so"
+
+          # defconfig pass — output to RAM disk
+          make -j$(nproc --all) LLVM=1 LLVM_IAS=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC="ccache clang" LD="$(pwd)/ld-wrapper" HOSTLD="$(pwd)/ld-wrapper" \
+            O=$GITHUB_WORKSPACE/kout \
+            KCFLAGS="-O2 -pipe -Wno-error -Wno-implicit-function-declaration -Wno-implicit-int -Wno-default-const-init-var-unsafe -Wno-format -Wno-unknown-warning-option" \
+            gki_defconfig
+
+          # Image build — output to RAM disk
+          make -j$(nproc --all) LLVM=1 LLVM_IAS=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC="ccache clang" LD="$(pwd)/ld-wrapper" HOSTLD="$(pwd)/ld-wrapper" \
+            O=$GITHUB_WORKSPACE/kout \
+            KCFLAGS="-O2 -pipe -Wno-error -Wno-implicit-function-declaration -Wno-implicit-int -Wno-default-const-init-var-unsafe -Wno-format -Wno-unknown-warning-option ${MAP}" \
+            Image
+
+          echo "Kernel Compilation Complete!"
+          ccache -c
+          ccache --evict-older-than 10800s
+          echo "CCache Status:"
+          ccache -s
+          df -h
+
+      - name: 📦 Save New CCache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-neov4-6.12.23-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+
+      - name: 📦 Save LTO CCache
+        if: success() && inputs.lto_type == 'thin'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.LDCACHE_DIR }}
+          key: lto-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          
+      - name: 🧠 Package AK3 ZIP
+        id: create_zip
+        run: |
+          cd kernel_workspace
+          git clone https://github.com/palazik/AnyKernel3 --depth=1
+          rm -rf ./AnyKernel3/.git
+          cd AnyKernel3
+          cp $GITHUB_WORKSPACE/kout/arch/arm64/boot/Image ./Image
+          if [[ ! -f ./Image ]]; then
+            echo "Kernel Image not found, build may have failed."
+            exit 1
+          fi
+          KSU_TYPENAME="BakaSU"
+          AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_6.12.23_palaziks-ShiftPorts.zip
+          FULL_VERSION=6.12.23-palaziks-ShiftPorts
+          zip -r ../$AK3_NAME ./*
+          echo "ak3name=$AK3_NAME" >> $GITHUB_OUTPUT
+          
+          TIME_NOW="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
+          echo "Author: $GITHUB_ACTOR" > ./ak3.log
+          echo "Repo: $GITHUB_REPOSITORY" >> ./ak3.log
+          echo "Branch: $GITHUB_REF_NAME" >> ./ak3.log
+          echo "Run ID: $GITHUB_RUN_ID" >> ./ak3.log
+          echo "Commit: $GITHUB_SHA" >> ./ak3.log
+          echo "Time: $TIME_NOW" >> ./ak3.log
+          echo "Kernel Ver: $FULL_VERSION" >> ./ak3.log
+          echo "KSU Branch: ${KSU_TYPENAME}" >> ./ak3.log
+          echo "KSU Ver: ${KSUVER}" >> ./ak3.log
+          echo "SuSFS: ${{ github.event.inputs.SUSFS }}" >> ./ak3.log
+          zip -z ../$AK3_NAME < ./ak3.log
+
+      - name: 📤 Upload AnyKernel3
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.create_zip.outputs.ak3name }}
+          path: ${{ github.workspace }}/kernel_workspace/AnyKernel*.zip
+
+      - name: 📝 Make ZRAM module
+        run: |
+          ZRAM_KO=$(find $GITHUB_WORKSPACE/kout -name "zram.ko" | head -1)
+          if [ -z "$ZRAM_KO" ]; then
+            echo "⚠️ zram.ko not found, skipping"
+            exit 0
+          fi
+          curl -L "https://github.com/cctv18/oppo_oplus_realme_sm8750/raw/refs/heads/main/zram.zip" -o zram.zip
+          unzip -q zram.zip -d zram
+          find zram -name "zram.ko" -exec cp "$ZRAM_KO" {} \;
+          rm -f zram.zip
+          echo "✅ Done!"
+
+      - name: 📤 Upload zram.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: zram-module
+          path: ./zram/*
+
+      - name: Send Telegram Notification (Success)
+        if: success()
+        env:
+          TELEGRAPH_TOKEN: ${{ secrets.TELEGRAPH_TOKEN }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          DATE=$(date +"%Y-%m-%d %H:%M:%S %Z")
+          COMMIT_HASH=$(echo "${{ github.sha }}" | cut -c1-8)
+          COMMIT_MSG="Workflow Dispatch: 6.12.23"
+          REPO_URL="https://github.com/${{ github.repository }}"
+          RUN_URL="$REPO_URL/actions/runs/${{ github.run_id }}"
+          TIME_NOW="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
+
+          export TG_KERNEL_VERSION="6.12.23"
+          export TG_KSU_DISPLAY="BakaSU"
+          export TG_KSUVER="${{ env.KSUVER }}"
+          export TG_SUFFIX="palaziks-ShiftPorts"
+          export TG_LTO="THIN"
+          export TG_BUILD_NUM="${{ github.run_number }}"
+          export TG_TIME_NOW="$TIME_NOW"
+          export TG_RUN_URL="$RUN_URL"
+          export TG_REPO="${{ github.repository }}"
+          export TG_SUSFS="${{ github.event.inputs.SUSFS }}"
+          export TG_MM="true"
+          export TG_CLANG="ZyCromerZ-19"
+
+          TELEGRAPH_URL=$(python3 << 'PYEOF'
+          import json, urllib.request, urllib.parse, os
+
+          e = os.environ.get
+
+          def feat(val, name):
+              icon = "✅" if val == "true" else "❌"
+              return {"tag": "li", "children": [f"{icon} {name}"]}
+
+          content = [
+              {"tag": "h3", "children": ["OnePlus 13 (PJZ110) — palaziks kernel"]},
+              {"tag": "hr"},
+              {"tag": "h4", "children": ["📋 Build Info"]},
+              {"tag": "ul", "children": [
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Device: "]}, "OnePlus 13 PJZ110 (CN) / SM8750"]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Kernel: "]}, f"{e('TG_KERNEL_VERSION')}-android16"]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Manager: "]}, f"{e('TG_KSU_DISPLAY')} v{e('TG_KSUVER')}"]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Suffix: "]}, f"-{e('TG_SUFFIX')}"]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["LTO: "]}, e("TG_LTO")]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Clang: "]}, e("TG_CLANG")]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Build #: "]}, e("TG_BUILD_NUM")]},
+                  {"tag": "li", "children": [{"tag": "strong", "children": ["Time: "]}, e("TG_TIME_NOW")]}
+              ]},
+              {"tag": "hr"},
+              {"tag": "h4", "children": ["⚡ Features"]},
+              {"tag": "ul", "children": [
+                  feat(e("TG_SUSFS"),   "SuSFS"),
+              ]},
+              {"tag": "hr"},
+              {"tag": "h4", "children": ["🎯 ROM Compatibility"]},
+              {"tag": "p", "children": ["⚠️ Built with ZyCromerZ Clang for ColorOS / OxygenOS ONLY. To flash on an AOSP-based ROM, build the matching \"... AOSP\" workflow yourself — AOSP Clang builds are for AOSP ROMs only."]},
+              {"tag": "hr"},
+              {"tag": "h4", "children": ["📥 Installation"]},
+              {"tag": "ol", "children": [
+                  {"tag": "li", "children": ["Flash AnyKernel3 zip via TWRP or KernelFlasher"]},
+                  {"tag": "li", "children": ["Install metamodule: mountify / meta-overlayfs / meta-magicmount"]},
+                  {"tag": "li", "children": ["I'm not responsible for bricked devices / losen data or other things"]},
+              ]},
+              {"tag": "hr"},
+              {"tag": "p", "children": [
+                  {"tag": "a", "attrs": {"href": e("TG_RUN_URL")}, "children": ["🔗 GitHub Actions Run"]},
+                  "  |  ",
+                  {"tag": "a", "attrs": {"href": f"https://github.com/{e('TG_REPO')}"}, "children": [f"📦 {e('TG_REPO')}"]},
+              ]},
+              {"tag": "p", "children": ["Built by @palaziks"]},
+          ]
+
+          data = {
+              "access_token": os.environ.get("TELEGRAPH_TOKEN", ""),
+              "title": f"palaziks kernel — OP13 {e('TG_KERNEL_VERSION')}-{e('TG_SUFFIX')} #{e('TG_BUILD_NUM')}",
+              "author_name": "palaziks",
+              "author_url": f"https://github.com/{e('TG_REPO')}",
+              "content": json.dumps(content),
+              "return_content": "false"
+          }
+
+          req = urllib.request.Request(
+              "https://api.telegra.ph/createPage",
+              data=urllib.parse.urlencode(data).encode(),
+              method="POST"
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=15) as resp:
+                  result = json.load(resp)
+                  if result.get("ok"):
+                      print(result["result"]["url"])
+                  else:
+                      import sys
+                      print(f"telegra.ph error: {result}", file=sys.stderr)
+                      print("")
+          except Exception as ex:
+              import sys
+              print(f"telegra.ph exception: {ex}", file=sys.stderr)
+              print("")
+          PYEOF
+          )
+
+          CAPTION="✅ <b>Kernel Build Successful!</b>
+
+          📱 <b>Device:</b> <code>OnePlus 13</code>
+          ⚡ <b>KSU:</b> <code>BakaSU</code>
+          📅 <b>Date:</b> $DATE
+          📝 <b>Commit:</b> <code>$COMMIT_MSG</code>
+          🔢 <b>Hash:</b> <a href=\"$REPO_URL/commit/${{ github.sha }}\">$COMMIT_HASH</a>
+          🔧 <b>Kernel features:</b> <a href=\"$TELEGRAPH_URL\">click to read</a>"
+
+          ZIP_PATH=$(ls ${{ github.workspace }}/kernel_workspace/AnyKernel*.zip | head -n 1)
+          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendDocument" \
+            -F chat_id="$TELEGRAM_CHAT_ID" \
+            -F document="@$ZIP_PATH" \
+            -F caption="$CAPTION" \
+            -F parse_mode="HTML"
+
+      - name: Send Telegram Notification (Failure)
+        if: failure()
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          DATE=$(date +"%Y-%m-%d %H:%M:%S %Z")
+          REPO_URL="https://github.com/${{ github.repository }}"
+          CAPTION="❌ <b>Kernel Build Failed!</b>
+
+          📱 <b>Device:</b> <code>OnePlus 13</code>
+          ⚡ <b>KSU:</b> <code>BakaSU</code>
+          📅 <b>Date:</b> $DATE
+          📝 <b>Commit:</b> <code>$COMMIT_MSG</code>
+          🔢 <b>Hash:</b> <a href=\"$REPO_URL/commit/${{ github.sha }}\">$(echo "${{ github.sha }}" | cut -c1-8)</a>"
+          
+          if [ -f /tmp/kbuild.log ]; then
+            curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendDocument" \
+              -F chat_id="$TELEGRAM_CHAT_ID" \
+              -F document="@/tmp/kbuild.log" \
+              -F caption="$CAPTION" \
+              -F parse_mode="HTML"
+          else
+            curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
+              -d chat_id="$TELEGRAM_CHAT_ID" \
+              -d text="$CAPTION" \
+              -d parse_mode="HTML"
+          fi
