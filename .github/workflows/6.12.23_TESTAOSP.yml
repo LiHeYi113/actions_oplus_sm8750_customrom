@@ -241,16 +241,16 @@ jobs:
           SRC="$(rustc --print sysroot)/lib/rustlib/src/rust/library"
           [ -d "$SRC" ] && echo "rust-src OK: $SRC" || { echo "❌ rust-src missing"; exit 1; }
 
-      - name: ⚡ Setup ReSukiSU
+      - name: ⚡ Setup BakaSU
         run: |
           cd kernel_workspace/common
-          echo "🛠️ Setting up ReSukiSU (main)..."
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
+          echo "🛠️ Setting up BakaSU (main)..."
+          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/refs/heads/main/kernel/setup.sh" | bash -s main
           cd KernelSU
           KSU_VERSION_COUNT=$(git rev-list --count HEAD)
           export KSUVER=$(expr $KSU_VERSION_COUNT + 37185)
           echo "KSUVER=$KSUVER" >> $GITHUB_ENV
-          echo "✅ ReSukiSU $(git rev-parse --short HEAD) (ver $KSUVER)"
+          echo "✅ BakaSU $(git rev-parse --short HEAD) (ver $KSUVER)"
 
       - name: 🔧 Setup Patches
         run: |
@@ -267,7 +267,7 @@ jobs:
             cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-android16-6.12.patch ./common/
             cp susfs4ksu/kernel_patches/fs/* ./common/fs/
             cp susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
-            # NO 10_ — SukiSU/ReSukiSU have SUSFS KSU-side integration in-source.
+            # NO 10_ — SukiSU/BakaSU have SUSFS KSU-side integration in-source.
             # (fatalcoder's production OnePlus v2.2.0 build applies 50_ only.)
           fi
 
@@ -296,10 +296,10 @@ jobs:
           sed -i 's/check_defconfig//' ./common/build.config.gki
           echo "CONFIG_HEADERS_INSTALL=n" >> "$DEFCONFIG"
       
-          # ReSukiSU custom version name (@palaziks) via its format-string config:
+          # BakaSU custom version name (@palaziks) via its format-string config:
           echo 'CONFIG_KSU_FULL_NAME_FORMAT="v%KSU_VERSION%-%COMMIT_SHA%@palaziks"' >> "$DEFCONFIG"
       
-          # SUSFS on => ReSukiSU auto-selects SuSFS Inline hook. Do NOT set CONFIG_KSU_MANUAL_HOOK.
+          # SUSFS on => BakaSU auto-selects SuSFS Inline hook. Do NOT set CONFIG_KSU_MANUAL_HOOK.
           if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
             echo "📦 Enabling SUSFS features..."
             echo "CONFIG_KSU_SUSFS=y" >> "$DEFCONFIG"
