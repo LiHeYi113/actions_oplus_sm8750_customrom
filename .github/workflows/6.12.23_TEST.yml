@@ -481,7 +481,7 @@ jobs:
           TIME_NOW="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
 
           export TG_KERNEL_VERSION="6.12.23"
-          export TG_KSU_DISPLAY="ReSukiSU"
+          export TG_KSU_DISPLAY="BakaSU"
           export TG_KSUVER="${{ env.KSUVER }}"
           export TG_SUFFIX="palaziks-ShiftPorts"
           export TG_LTO="THIN"
