@@ -19,7 +19,7 @@ on:
         description: 'KernelSU variant'
         required: true
         type: choice
-        default: 'ReSukiSU'
+        default: 'BakaSU'
         options:
           - 'BakaSU'
           - 'SukiSU Ultra'
