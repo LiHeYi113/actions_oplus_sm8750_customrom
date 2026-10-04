@@ -474,7 +474,7 @@ jobs:
           DEFCONFIG="./common/arch/arm64/configs/gki_defconfig"
           echo "CONFIG_KSU=y" >> "$DEFCONFIG"
           case "${{ inputs.ksu_type }}" in
-            "ReSukiSU")
+            "BakaSU")
               echo 'CONFIG_KSU_FULL_NAME_FORMAT="v%KSU_VERSION%-%COMMIT_SHA%@palaziks"' >> "$DEFCONFIG"
               ;;
             "SukiSU Ultra")
