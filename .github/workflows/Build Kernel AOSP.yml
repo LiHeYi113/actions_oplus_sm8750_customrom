@@ -21,7 +21,7 @@ on:
         type: choice
         default: 'ReSukiSU'
         options:
-          - 'ReSukiSU'
+          - 'BakaSU'
           - 'SukiSU Ultra'
           - 'KernelSU'
           - 'KernelSU Next'
@@ -318,15 +318,15 @@ jobs:
           echo "Updating atime to achieve cache eviction..."
           find "${{ env.CCACHE_DIR }}" -type f -exec touch -t $(date -d "1 day ago" +%Y%m%d%H%M) {} + || true
 
-      - name: ⚡ Setup ReSukiSU
-        if: inputs.ksu_type == 'ReSukiSU'
+      - name: ⚡ Setup BakaSU
+        if: inputs.ksu_type == 'BakaSU'
         run: |
           cd kernel_workspace/common
-          echo "🛠️ Setting up ReSukiSU (main)..."
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
+          echo "🛠️ Setting up BakaSU (main)..."
+          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/refs/heads/main/kernel/setup.sh" | bash -s main
           cd KernelSU
           KSU_VERSION_COUNT=$(git rev-list --count HEAD)
-          export KSUVER=$(expr $KSU_VERSION_COUNT + 37185)
+          export KSUVER=$(expr $KSU_VERSION_COUNT + 30700)
           echo "KSUVER=$KSUVER" >> $GITHUB_ENV
           echo "✅ ReSukiSU $(git rev-parse --short HEAD) (ver $KSUVER)"
 
@@ -400,8 +400,8 @@ jobs:
           git apply -p1 < EnablePOLLY.patch || true
           echo "✅ Base patches applied"
 
-      - name: 📦 Apply SUSFS (ReSukiSU / SukiSU Ultra)
-        if: inputs.SUSFS && (inputs.ksu_type == 'ReSukiSU' || inputs.ksu_type == 'SukiSU Ultra')
+      - name: 📦 Apply SUSFS (BakaSU / SukiSU Ultra)
+        if: inputs.SUSFS && (inputs.ksu_type == 'BakaSU' || inputs.ksu_type == 'SukiSU Ultra')
         working-directory: kernel_workspace/common
         run: |
           echo "📦 Pre-patch fixups (fatalcoder android15-6.6 method)..."
