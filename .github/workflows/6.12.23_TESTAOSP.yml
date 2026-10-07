@@ -248,7 +248,7 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/refs/heads/main/kernel/setup.sh" | bash -s main
           cd KernelSU
           KSU_VERSION_COUNT=$(git rev-list --count HEAD)
-          export KSUVER=$(expr $KSU_VERSION_COUNT + 37185)
+          export KSUVER=$(expr $KSU_VERSION_COUNT + 30700)
           echo "KSUVER=$KSUVER" >> $GITHUB_ENV
           echo "✅ BakaSU $(git rev-parse --short HEAD) (ver $KSUVER)"
 
