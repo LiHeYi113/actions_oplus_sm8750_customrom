@@ -118,34 +118,47 @@ jobs:
           restore-keys: |
             los-${{ env.KERNEL_BRANCH }}-
 
-      - name: Integrate SukiSU Ultra and optional built-in SuSFS
+      - name: Integrate SukiSU Ultra and optional SuSFS patches
         working-directory: kernel
         shell: bash
         run: |
           set -euo pipefail
-          # SukiSU's documented setup script installs the driver into drivers/kernelsu.
-          # Use its SUSFS-integrated branch when requested to avoid applying a mismatched
-          # external KernelSU patch series to an independently changing SukiSU checkout.
+          # Use SukiSU's documented main branch for GKI: Kprobes/kretprobes,
+          # with no manual hook edits to the official LOS kernel source.
           curl --fail --location --retry 5 \
             https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh \
             -o /tmp/sukisu-setup.sh
-          if [[ "$ENABLE_SUSFS" == "true" ]]; then
-            SUKISU_BRANCH="susfs-main"
-          else
-            SUKISU_BRANCH="main"
-          fi
-          bash /tmp/sukisu-setup.sh "$SUKISU_BRANCH"
+          bash /tmp/sukisu-setup.sh main
           test -e drivers/kernelsu/Kconfig
           grep -qE '^[[:space:]]*config KSU([[:space:]]|$)' drivers/kernelsu/Kconfig
+
           if [[ "$ENABLE_SUSFS" == "true" ]]; then
-            if ! grep -RqsE '^[[:space:]]*config KSU_SUSFS([[:space:]]|$)' drivers/kernelsu; then
-              echo "ERROR: selected SukiSU branch does not expose CONFIG_KSU_SUSFS; refusing to build." >&2
-              exit 1
-            fi
+            # Do not request the non-existent/unreliable "susfs-main" ref.
+            # Integrate SUSFS using its Android 15 / 6.6 patch series instead.
+            git clone --depth=1 --branch gki-android15-6.6 \
+              https://gitlab.com/simonpunk/susfs4ksu.git "$GITHUB_WORKSPACE/susfs4ksu"
+            test -s "$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
+            test -s "$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
+
+            cp "$GITHUB_WORKSPACE"/susfs4ksu/kernel_patches/fs/* fs/
+            cp "$GITHUB_WORKSPACE"/susfs4ksu/kernel_patches/include/linux/* include/linux/
+
+            # Fail closed on any source mismatch; never continue with a partial patch.
+            patch --batch --forward -p1 \
+              < "$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
+            (
+              cd KernelSU
+              patch --batch --forward -p1 \
+                < "$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
+            )
+            grep -RqsE '^[[:space:]]*config KSU_SUSFS([[:space:]]|$)' drivers/kernelsu
+            grep -q 'SUSFS_VERSION' include/linux/susfs.h
+            echo "SuSFS kernel patch and SukiSU integration patch applied."
           fi
-          echo "SukiSU branch requested: ${SUKISU_BRANCH}"
+
+          echo "SukiSU branch: main"
           echo "SukiSU commit: $(git -C KernelSU rev-parse --short=12 HEAD)"
-          echo "SUKISU_BRANCH=${SUKISU_BRANCH}" >> "$GITHUB_ENV"
+          echo "SUKISU_BRANCH=main" >> "$GITHUB_ENV"
           echo "SUKISU_COMMIT=$(git -C KernelSU rev-parse --short=12 HEAD)" >> "$GITHUB_ENV"
 
       - name: Configure official GKI + Parrot device config and requested features
@@ -170,7 +183,7 @@ jobs:
           CFG="$GITHUB_WORKSPACE/kernel/out/.config"
           CONFIG_TOOL="$GITHUB_WORKSPACE/kernel/scripts/config"
 
-          # SukiSU main/susfs-main uses kprobes. Keep stock GKI ABI controls intact.
+          # SukiSU main uses kprobes. Keep stock GKI ABI controls intact.
           "$CONFIG_TOOL" --file "$CFG" --enable KSU
           "$CONFIG_TOOL" --file "$CFG" --enable KPROBES
           "$CONFIG_TOOL" --file "$CFG" --enable KRETPROBES
