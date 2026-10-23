@@ -1,0 +1,353 @@
+name: LineageOS 24.0 - OnePlus 13 Kernel
+run-name: "LOS 24.0 SM8750 | SukiSU Ultra + SuSFS"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      enable_susfs:
+        description: "Use SukiSU Ultra's SUSFS-integrated branch"
+        type: boolean
+        required: true
+        default: true
+      enable_droidspaces:
+        description: "Enable common Droidspaces/proot kernel options"
+        type: boolean
+        required: true
+        default: true
+      enable_ip_set:
+        description: "Add IP_SET and IPv6 NAT options if needed"
+        type: boolean
+        required: true
+        default: false
+      enable_ttl_target:
+        description: "Add Netfilter TTL/HL targets if needed"
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+# These match build.config.constants/build.config.common in the LOS branch.
+env:
+  TZ: Asia/Shanghai
+  KERNEL_REPO: https://github.com/LineageOS/android_kernel_oneplus_sm8750.git
+  KERNEL_BRANCH: lineage-24.0
+  CLANG_VERSION: r510928
+
+jobs:
+  build:
+    name: Build LOS kernel and AnyKernel3 ZIP
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write
+    env:
+      ENABLE_SUSFS: ${{ inputs.enable_susfs }}
+      ENABLE_DROIDSPACES: ${{ inputs.enable_droidspaces }}
+      ENABLE_IP_SET: ${{ inputs.enable_ip_set }}
+      ENABLE_TTL_TARGET: ${{ inputs.enable_ttl_target }}
+    steps:
+      - name: Install host build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ca-certificates ccache curl flex git \
+            libelf-dev libssl-dev lld llvm pahole python3 rsync unzip zip \
+            device-tree-compiler libncurses-dev dwarves zlib1g-dev liblz4-tool
+          df -h
+
+      - name: Restore official Clang cache
+        id: clang-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/toolchain/clang-${{ env.CLANG_VERSION }}
+          key: los-${{ env.KERNEL_BRANCH }}-clang-${{ env.CLANG_VERSION }}-android15-platform-v1
+
+      - name: Download LOS branch-matched Clang
+        if: steps.clang-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/toolchain/clang-${CLANG_VERSION}"
+          curl --fail --location --retry 5 --retry-delay 2 \
+            "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android15-platform-release/clang-${CLANG_VERSION}.tar.gz" \
+            -o /tmp/clang.tar.gz
+          tar -xzf /tmp/clang.tar.gz \
+            -C "$GITHUB_WORKSPACE/toolchain/clang-${CLANG_VERSION}"
+          test -x "$GITHUB_WORKSPACE/toolchain/clang-${CLANG_VERSION}/bin/clang"
+          "$GITHUB_WORKSPACE/toolchain/clang-${CLANG_VERSION}/bin/clang" --version
+
+      - name: Save Clang cache
+        if: steps.clang-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/toolchain/clang-${{ env.CLANG_VERSION }}
+          key: los-${{ env.KERNEL_BRANCH }}-clang-${{ env.CLANG_VERSION }}-android15-platform-v1
+
+      - name: Checkout official LineageOS kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --single-branch --branch "$KERNEL_BRANCH" \
+            "$KERNEL_REPO" "$GITHUB_WORKSPACE/kernel"
+          cd "$GITHUB_WORKSPACE/kernel"
+          echo "KERNEL_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "KERNEL_SHORT_COMMIT=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_ENV"
+          echo "Kernel source: $(git remote get-url origin)"
+          echo "Kernel branch: $(git branch --show-current)"
+          git log -1 --oneline
+          test -f build.config.constants
+          test -f build.config.common
+          test -f build.config.msm.parrot
+          test -f arch/arm64/configs/gki_defconfig
+          test -f arch/arm64/configs/vendor/parrot_perf.config
+
+      - name: Restore ccache
+        id: ccache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: los-${{ env.KERNEL_BRANCH }}-${{ github.sha }}
+          restore-keys: |
+            los-${{ env.KERNEL_BRANCH }}-
+
+      - name: Integrate SukiSU Ultra and optional built-in SuSFS
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          # SukiSU's documented setup script installs the driver into drivers/kernelsu.
+          # Use its SUSFS-integrated branch when requested to avoid applying a mismatched
+          # external KernelSU patch series to an independently changing SukiSU checkout.
+          curl --fail --location --retry 5 \
+            https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh \
+            -o /tmp/sukisu-setup.sh
+          if [[ "$ENABLE_SUSFS" == "true" ]]; then
+            SUKISU_BRANCH="susfs-main"
+          else
+            SUKISU_BRANCH="main"
+          fi
+          bash /tmp/sukisu-setup.sh "$SUKISU_BRANCH"
+          test -e drivers/kernelsu/Kconfig
+          grep -qE '^[[:space:]]*config KSU([[:space:]]|$)' drivers/kernelsu/Kconfig
+          if [[ "$ENABLE_SUSFS" == "true" ]]; then
+            if ! grep -RqsE '^[[:space:]]*config KSU_SUSFS([[:space:]]|$)' drivers/kernelsu; then
+              echo "ERROR: selected SukiSU branch does not expose CONFIG_KSU_SUSFS; refusing to build." >&2
+              exit 1
+            fi
+          fi
+          echo "SukiSU branch requested: ${SUKISU_BRANCH}"
+          echo "SukiSU commit: $(git -C KernelSU rev-parse --short=12 HEAD)"
+          echo "SUKISU_BRANCH=${SUKISU_BRANCH}" >> "$GITHUB_ENV"
+          echo "SUKISU_COMMIT=$(git -C KernelSU rev-parse --short=12 HEAD)" >> "$GITHUB_ENV"
+
+      - name: Configure official GKI + Parrot device config and requested features
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$GITHUB_WORKSPACE/toolchain/clang-${CLANG_VERSION}/bin:$PATH"
+          export ARCH=arm64 LLVM=1 LLVM_IAS=1
+          export KCFLAGS="-D__ANDROID_COMMON_KERNEL__"
+          mkdir -p out
+
+          # Start from the LOS branch's upstream GKI defconfig, then merge the
+          # device fragment used by build.config.msm.perf (not third-party patches).
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+            KCFLAGS="$KCFLAGS" gki_defconfig
+          scripts/kconfig/merge_config.sh -m -r -y -O out \
+            out/.config arch/arm64/configs/vendor/parrot_perf.config
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+            KCFLAGS="$KCFLAGS" olddefconfig
+
+          CFG="$GITHUB_WORKSPACE/kernel/out/.config"
+          CONFIG_TOOL="$GITHUB_WORKSPACE/kernel/scripts/config"
+
+          # SukiSU main/susfs-main uses kprobes. Keep stock GKI ABI controls intact.
+          "$CONFIG_TOOL" --file "$CFG" --enable KSU
+          "$CONFIG_TOOL" --file "$CFG" --enable KPROBES
+          "$CONFIG_TOOL" --file "$CFG" --enable KRETPROBES
+          "$CONFIG_TOOL" --file "$CFG" --enable EXT4_FS
+          # Avoid an SCM-derived -dirty/-g<sha> suffix after integrating SukiSU.
+          # This changes only the output config, not the official source files.
+          "$CONFIG_TOOL" --file "$CFG" --disable LOCALVERSION_AUTO
+
+          # Droidspaces / proot: only add the commonly required generic options.
+          if [[ "$ENABLE_DROIDSPACES" == "true" ]]; then
+            "$CONFIG_TOOL" --file "$CFG" --enable SYSVIPC
+            "$CONFIG_TOOL" --file "$CFG" --enable DEVTMPFS
+            "$CONFIG_TOOL" --file "$CFG" --enable PID_NS
+            "$CONFIG_TOOL" --file "$CFG" --enable POSIX_MQUEUE
+          fi
+
+          # Preserve LOS networking defaults: BBR, WireGuard and base Netfilter stay
+          # as defined by the official defconfig. These extra options are opt-in only.
+          if [[ "$ENABLE_IP_SET" == "true" ]]; then
+            "$CONFIG_TOOL" --file "$CFG" --enable IP_SET
+            "$CONFIG_TOOL" --file "$CFG" --enable NETFILTER_XT_SET
+            "$CONFIG_TOOL" --file "$CFG" --enable IP6_NF_NAT
+            "$CONFIG_TOOL" --file "$CFG" --enable IP6_NF_TARGET_MASQUERADE
+          fi
+          if [[ "$ENABLE_TTL_TARGET" == "true" ]]; then
+            "$CONFIG_TOOL" --file "$CFG" --enable IP_NF_TARGET_TTL
+            "$CONFIG_TOOL" --file "$CFG" --enable IP6_NF_TARGET_HL
+            "$CONFIG_TOOL" --file "$CFG" --enable IP6_NF_MATCH_HL
+          fi
+
+          if [[ "$ENABLE_SUSFS" == "true" ]]; then
+            "$CONFIG_TOOL" --file "$CFG" --enable KSU_SUSFS
+            # Enable known SuSFS features only if this branch actually defines them.
+            # Keep branch defaults for other options to minimize divergence.
+            for opt in \
+              KSU_SUSFS_SUS_PATH \
+              KSU_SUSFS_SUS_MOUNT \
+              KSU_SUSFS_SUS_KSTAT \
+              KSU_SUSFS_SUS_MAP \
+              KSU_SUSFS_SPOOF_UNAME \
+              KSU_SUSFS_ENABLE_LOG \
+              KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
+              KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
+              KSU_SUSFS_OPEN_REDIRECT \
+              KSU_SUSFS_HAS_MAGIC_MOUNT \
+              KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT \
+              KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT \
+              KSU_SUSFS_TRY_UMOUNT \
+              KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT; do
+              if grep -RqsE "^[[:space:]]*config ${opt}([[:space:]]|$)" drivers/kernelsu; then
+                "$CONFIG_TOOL" --file "$CFG" --enable "$opt"
+              fi
+            done
+            # OverlayFS spoofing and separate SUS_SU are intentionally not forced on.
+            if grep -RqsE '^[[:space:]]*config KSU_SUSFS_SUS_OVERLAYFS([[:space:]]|$)' drivers/kernelsu; then
+              "$CONFIG_TOOL" --file "$CFG" --disable KSU_SUSFS_SUS_OVERLAYFS
+            fi
+            if grep -RqsE '^[[:space:]]*config KSU_SUSFS_SUS_SU([[:space:]]|$)' drivers/kernelsu; then
+              "$CONFIG_TOOL" --file "$CFG" --disable KSU_SUSFS_SUS_SU
+            fi
+          fi
+
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+            KCFLAGS="$KCFLAGS" olddefconfig
+
+          echo "---- Relevant final kernel config ----"
+          grep -E '^(CONFIG_(KSU|KPROBES|KRETPROBES|EXT4_FS|KSU_SUSFS|SYSVIPC|DEVTMPFS|PID_NS|POSIX_MQUEUE|WIREGUARD|TCP_CONG_BBR|IP_SET|NETFILTER_XT_SET|IP6_NF_NAT|IP6_NF_TARGET_MASQUERADE|IP_NF_TARGET_TTL|IP6_NF_TARGET_HL|IP6_NF_MATCH_HL)=|# CONFIG_(KSU_SUSFS|PID_NS|IP_SET|IP6_NF_NAT) is not set)' out/.config || true
+          grep -q '^CONFIG_KSU=y$' out/.config
+          grep -q '^CONFIG_KPROBES=y$' out/.config
+          if [[ "$ENABLE_SUSFS" == "true" ]]; then grep -q '^CONFIG_KSU_SUSFS=y$' out/.config; fi
+          grep -q '^CONFIG_WIREGUARD=y$' out/.config
+          grep -q '^CONFIG_TCP_CONG_BBR=y$' out/.config
+          if [[ "$ENABLE_DROIDSPACES" == "true" ]]; then
+            grep -q '^CONFIG_SYSVIPC=y$' out/.config
+            grep -q '^CONFIG_DEVTMPFS=y$' out/.config
+            grep -q '^CONFIG_PID_NS=y$' out/.config
+            grep -q '^CONFIG_POSIX_MQUEUE=y$' out/.config
+          fi
+          if [[ "$ENABLE_IP_SET" == "true" ]]; then
+            grep -q '^CONFIG_IP_SET=y$' out/.config
+            grep -q '^CONFIG_NETFILTER_XT_SET=y$' out/.config
+            grep -q '^CONFIG_IP6_NF_NAT=y$' out/.config
+            grep -q '^CONFIG_IP6_NF_TARGET_MASQUERADE=y$' out/.config
+          fi
+          if [[ "$ENABLE_TTL_TARGET" == "true" ]]; then
+            grep -q '^CONFIG_IP_NF_TARGET_TTL=y$' out/.config
+            grep -q '^CONFIG_IP6_NF_TARGET_HL=y$' out/.config
+            grep -q '^CONFIG_IP6_NF_MATCH_HL=y$' out/.config
+          fi
+
+      - name: Build kernel Image, DTBs and modules
+        working-directory: kernel
+        shell: bash
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          CCACHE_MAXSIZE: 10G
+        run: |
+          set -euo pipefail
+          export PATH="$GITHUB_WORKSPACE/toolchain/clang-${CLANG_VERSION}/bin:$PATH"
+          export ARCH=arm64 LLVM=1 LLVM_IAS=1
+          export KCFLAGS="-D__ANDROID_COMMON_KERNEL__"
+          mkdir -p "$CCACHE_DIR"
+          ccache -M "$CCACHE_MAXSIZE"
+          export CC="ccache clang"
+          export KBUILD_BUILD_USER=github-actions
+          export KBUILD_BUILD_HOST=lineageos-ci
+          echo "Clang: $(clang --version | head -n 1)"
+          echo "DTC: $(dtc --version)"
+          echo "Kernel release target: $(make -s O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 kernelrelease)"
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+            KCFLAGS="$KCFLAGS" DTC_FLAGS="-@" \
+            -j"$(nproc)" Image dtbs modules
+          test -s out/arch/arm64/boot/Image
+          ccache -s
+
+      - name: Save ccache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: los-${{ env.KERNEL_BRANCH }}-${{ github.sha }}
+
+      - name: Package AnyKernel3 ZIP
+        id: package
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          AK3_DIR="$GITHUB_WORKSPACE/AnyKernel3"
+          git clone --depth=1 https://github.com/palazik/AnyKernel3.git "$AK3_DIR"
+          rm -rf "$AK3_DIR/.git"
+          cp out/arch/arm64/boot/Image "$AK3_DIR/Image"
+          test -s "$AK3_DIR/Image"
+
+          cat > "$AK3_DIR/BUILD-INFO.txt" <<EOF
+          Device: OnePlus 13 (SM8750 / PJZ110)
+          ROM target: LineageOS lineage-24.0
+          Kernel source: ${KERNEL_REPO}
+          Kernel branch: ${KERNEL_BRANCH}
+          Kernel commit: ${KERNEL_COMMIT}
+          Kernel release: $(make -s O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 kernelrelease)
+          Clang: ${CLANG_VERSION}
+          Device config fragment: arch/arm64/configs/vendor/parrot_perf.config
+          Root: SukiSU Ultra
+          SukiSU branch: ${SUKISU_BRANCH}
+          SukiSU commit: ${SUKISU_COMMIT}
+          SuSFS requested: ${ENABLE_SUSFS}
+          Droidspaces options requested: ${ENABLE_DROIDSPACES}
+          IP_SET / IPv6 NAT requested: ${ENABLE_IP_SET}
+          TTL/HL target requested: ${ENABLE_TTL_TARGET}
+          Built at UTC: $(date -u '+%Y-%m-%d %H:%M:%S')
+          Build note: standalone Kbuild using LOS GKI + Parrot config fragment; not a complete LineageOS ROM/kernel build.
+          EOF
+
+          ZIP_NAME="AnyKernel3_LineageOS24_SukiSU-Ultra_${KERNEL_SHORT_COMMIT}_${GITHUB_RUN_NUMBER}.zip"
+          cd "$AK3_DIR"
+          zip -qr "$GITHUB_WORKSPACE/$ZIP_NAME" . -x '.git/*' '*/.git/*'
+          echo "zip_name=${ZIP_NAME}" >> "$GITHUB_OUTPUT"
+          ls -lh "$GITHUB_WORKSPACE/$ZIP_NAME"
+
+      - name: Upload kernel ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.zip_name }}
+          path: ${{ github.workspace }}/AnyKernel3_LineageOS24_SukiSU-Ultra_*.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload kernel diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LOS24-kernel-diagnostics-${{ github.run_number }}
+          path: |
+            kernel/out/.config
+            kernel/out/.config.old
+            kernel/out/arch/arm64/boot/Image
+          if-no-files-found: ignore
+          retention-days: 7
