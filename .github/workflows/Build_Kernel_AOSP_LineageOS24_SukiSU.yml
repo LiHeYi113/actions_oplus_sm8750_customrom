@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       enable_susfs:
-        description: "Use SukiSU Ultra's SUSFS-integrated branch"
+        description: "Use SukiSU Ultra builtin branch with SUSFS support"
         type: boolean
         required: true
         default: true
@@ -118,48 +118,83 @@ jobs:
           restore-keys: |
             los-${{ env.KERNEL_BRANCH }}-
 
-      - name: Integrate SukiSU Ultra and optional SuSFS patches
+      - name: Setup SukiSU Ultra builtin and apply SuSFS (upstream workflow method)
         working-directory: kernel
         shell: bash
         run: |
           set -euo pipefail
-          # Use SukiSU's documented main branch for GKI: Kprobes/kretprobes,
-          # with no manual hook edits to the official LOS kernel source.
+
+          # Match the referenced Build Kernel AOSP workflow: use the builtin
+          # setup endpoint and SukiSU's manual-hook integration.
           curl --fail --location --retry 5 \
-            https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh \
-            -o /tmp/sukisu-setup.sh
-          bash /tmp/sukisu-setup.sh main
-          test -e drivers/kernelsu/Kconfig
-          grep -qE '^[[:space:]]*config KSU([[:space:]]|$)' drivers/kernelsu/Kconfig
+            https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/builtin/kernel/setup.sh \
+            | bash -s builtin
+
+          test -d KernelSU
+          cd KernelSU
+          KSU_VERSION_COUNT=$(git rev-list --count HEAD)
+          KSUVER=$(expr "$KSU_VERSION_COUNT" + 37185)
+          echo "KSUVER=$KSUVER" >> "$GITHUB_ENV"
+          KSU_API_VERSION=$(grep -E '^KSU_VERSION[[:space:]]*=' ../Makefile | cut -d'=' -f2 | tr -d '[:space:]' || true)
+          [[ -n "$KSU_API_VERSION" ]] || KSU_API_VERSION="12800"
+          KSU_COMMIT_HASH=$(git rev-parse --short=8 HEAD)
+          KBUILD_FILE="kernel/Makefile"
+          [[ ! -f kernel/Kbuild ]] || KBUILD_FILE="kernel/Kbuild"
+          sed -i 's/-DKSU_VERSION_FULL=[^ ]*//g' "$KBUILD_FILE"
+          sed -i '/KSU_VERSION_FULL/d' "$KBUILD_FILE"
+          cat >> "$KBUILD_FILE" <<EOF
+          ccflags-y += -DKSU_VERSION_FULL=\"v${KSU_API_VERSION}-${KSU_COMMIT_HASH}@palaziks\"
+          EOF
+          cd ..
+
+          echo "SUKISU_BRANCH=builtin" >> "$GITHUB_ENV"
+          echo "SUKISU_COMMIT=$(git -C KernelSU rev-parse --short=12 HEAD)" >> "$GITHUB_ENV"
+          echo "SukiSU Ultra builtin installed: $(git -C KernelSU rev-parse --short=12 HEAD), KSUVER=$KSUVER"
 
           if [[ "$ENABLE_SUSFS" == "true" ]]; then
-            # Do not request the non-existent/unreliable "susfs-main" ref.
-            # Integrate SUSFS using its Android 15 / 6.6 patch series instead.
+            # Same SUSFS source/branch and kernel-side patch strategy as the
+            # referenced upstream workflow. The 10_enable_susfs_for_ksu.patch
+            # is intentionally NOT applied to SukiSU Ultra builtin.
             git clone --depth=1 --branch gki-android15-6.6 \
               https://gitlab.com/simonpunk/susfs4ksu.git "$GITHUB_WORKSPACE/susfs4ksu"
-            test -s "$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
-            test -s "$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
 
+            SUSFS_PATCH="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
+            test -s "$SUSFS_PATCH"
             cp "$GITHUB_WORKSPACE"/susfs4ksu/kernel_patches/fs/* fs/
             cp "$GITHUB_WORKSPACE"/susfs4ksu/kernel_patches/include/linux/* include/linux/
 
-            # Fail closed on any source mismatch; never continue with a partial patch.
-            patch --batch --forward -p1 \
-              < "$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
-            (
-              cd KernelSU
-              patch --batch --forward -p1 \
-                < "$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
-            )
-            grep -RqsE '^[[:space:]]*config KSU_SUSFS([[:space:]]|$)' drivers/kernelsu
-            grep -q 'SUSFS_VERSION' include/linux/susfs.h
-            echo "SuSFS kernel patch and SukiSU integration patch applied."
-          fi
+            echo "SuSFS pre-patch fixups (fatalcoder Android 15 / 6.6 method)..."
+            if ! grep -qxF $'\tunsigned int nr_subpages = __PAGE_SIZE / PAGE_SIZE;' fs/proc/task_mmu.c; then
+              sed -i \
+                -e '/int ret = 0, copied = 0;/a \\tunsigned int nr_subpages \= __PAGE_SIZE \/ PAGE_SIZE;' \
+                -e '/int ret = 0, copied = 0;/a \\tpagemap_entry_t \*res = NULL;' \
+                fs/proc/task_mmu.c
+            fi
 
-          echo "SukiSU branch: main"
-          echo "SukiSU commit: $(git -C KernelSU rev-parse --short=12 HEAD)"
-          echo "SUKISU_BRANCH=main" >> "$GITHUB_ENV"
-          echo "SUKISU_COMMIT=$(git -C KernelSU rev-parse --short=12 HEAD)" >> "$GITHUB_ENV"
+            if ! grep -qxF '#include <linux/dma-buf.h>' fs/proc/base.c; then
+              sed -i '/#include <linux\/cpufreq_times.h>/a #include <linux/dma-buf.h>' fs/proc/base.c
+            fi
+
+            if ! grep -qxF '#include <linux/zswap.h>' mm/memory.c; then
+              sed -i '/#include <linux\/sched\/sysctl\.h>/a #include <linux/zswap.h>' mm/memory.c
+            fi
+
+            if grep -qF 'if (vma->vm_end > last_vma_end)' fs/proc/task_mmu.c \
+              && ! grep -qF 'if (vma->vm_end > last_vma_end) {' fs/proc/task_mmu.c; then
+              perl -i -0pe 's/\t\t\tif \(vma->vm_end > last_vma_end\)\n\t\t\t\tsmap_gather_stats\(vma, &mss, last_vma_end\);/\t\t\tif (vma->vm_end > last_vma_end) {\n\t\t\t\tsmap_gather_stats(vma, \&mss, last_vma_end);\n\t\t\t\tlast_vma_end = vma->vm_end;\n\t\t\t}/' fs/proc/task_mmu.c
+            fi
+
+            cp "$SUSFS_PATCH" ./50_add_susfs_in_gki-android15-6.6.patch
+            echo "Applying SUSFS kernel patch (known rejects tolerated only if guard validates)..."
+            patch -p1 --forward < 50_add_susfs_in_gki-android15-6.6.patch || true
+
+            # Do not accept a partial/ineffective patch merely because patch returned.
+            grep -qF 'SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file))' fs/proc/task_mmu.c \
+              || { echo "::error::SuSFS SUS_MAP guard missing; patch is incompatible with this LOS source."; exit 1; }
+            test -s include/linux/susfs.h
+            grep -q 'SUSFS_VERSION' include/linux/susfs.h
+            echo "SuSFS kernel patch applied and SUS_MAP guard verified."
+          fi
 
       - name: Configure official GKI + Parrot device config and requested features
         working-directory: kernel
@@ -183,10 +218,9 @@ jobs:
           CFG="$GITHUB_WORKSPACE/kernel/out/.config"
           CONFIG_TOOL="$GITHUB_WORKSPACE/kernel/scripts/config"
 
-          # SukiSU main uses kprobes. Keep stock GKI ABI controls intact.
+          # SukiSU builtin uses manual kernel hooks; keep Kprobes enabled only
+          # if already selected by the official LOS/device config. KSU needs ext4.
           "$CONFIG_TOOL" --file "$CFG" --enable KSU
-          "$CONFIG_TOOL" --file "$CFG" --enable KPROBES
-          "$CONFIG_TOOL" --file "$CFG" --enable KRETPROBES
           "$CONFIG_TOOL" --file "$CFG" --enable EXT4_FS
           # Avoid an SCM-derived -dirty/-g<sha> suffix after integrating SukiSU.
           # This changes only the output config, not the official source files.
@@ -252,7 +286,6 @@ jobs:
           echo "---- Relevant final kernel config ----"
           grep -E '^(CONFIG_(KSU|KPROBES|KRETPROBES|EXT4_FS|KSU_SUSFS|SYSVIPC|DEVTMPFS|PID_NS|POSIX_MQUEUE|WIREGUARD|TCP_CONG_BBR|IP_SET|NETFILTER_XT_SET|IP6_NF_NAT|IP6_NF_TARGET_MASQUERADE|IP_NF_TARGET_TTL|IP6_NF_TARGET_HL|IP6_NF_MATCH_HL)=|# CONFIG_(KSU_SUSFS|PID_NS|IP_SET|IP6_NF_NAT) is not set)' out/.config || true
           grep -q '^CONFIG_KSU=y$' out/.config
-          grep -q '^CONFIG_KPROBES=y$' out/.config
           if [[ "$ENABLE_SUSFS" == "true" ]]; then grep -q '^CONFIG_KSU_SUSFS=y$' out/.config; fi
           grep -q '^CONFIG_WIREGUARD=y$' out/.config
           grep -q '^CONFIG_TCP_CONG_BBR=y$' out/.config
